@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 260px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #080C14;
+      color: #F3F4F6;
+      margin: 0;
+      padding: 12px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #1F2E47;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .title {
+      font-size: 13px;
+      font-weight: bold;
+      margin: 0;
+    }
+    .form-group {
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      font-size: 10px;
+      color: #9CA3AF;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      font-weight: bold;
+    }
+    select {
+      width: 100%;
+      background: #0E1624;
+      border: 1px solid #1F2E47;
+      color: #F3F4F6;
+      padding: 6px;
+      border-radius: 6px;
+      font-size: 11px;
+      outline: none;
+    }
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      color: #10B981;
+      padding: 4px 8px;
+      border-radius: 6px;
+    }
+    .footer {
+      font-size: 9px;
+      color: #6B7280;
+      text-align: center;
+      margin-top: 12px;
+      border-top: 1px solid #1F2E47;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span style="font-size: 16px;">🛡️</span>
+    <h3 class="title">SecurePrompt Settings</h3>
+  </div>
+
+  <div class="form-group">
+    <label>Rewrite Model Choice</label>
+    <select id="model-select">
+      <option value="phi4-mini">phi4-mini (2.5GB)</option>
+      <option value="llama3.1">llama3.1 (4.9GB)</option>
+    </select>
+  </div>
+
+  <div class="form-group">
+    <label>Gateway Status</label>
+    <div class="status-badge">
+      <span style="width: 6px; height: 6px; background: #10B981; border-radius: 50%;"></span>
+      <span>FastAPI Local Gateway Running</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    SecurePrompt v1.0.0 • Local LLM Sandboxed
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

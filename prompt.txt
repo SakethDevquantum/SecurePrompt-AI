@@ -1,0 +1,297 @@
+description (from my official hackathon):
+
+Shadow AI Leak Detector (Redact & Rewrite)
+
+Employees often paste company data into public AI chatbots without realizing it leaves the company’s control. Build a tool that scans the text, automatically redacts sensitive parts (names, account numbers, figures), and instantly shows a safe rewritten version the employee can paste instead — guiding them to safety rather than just blocking them.
+
+Self-generated sensitive-text pattern list; public PII detection pattern examples (e.g. Microsoft Presidio test data)
+
+Regex/NER detection + Phi-4-mini (safe rewrite generation)
+
+description 2(from official hackathon):
+
+Shadow AI Leak Detector (Redact & Rewrite)
+
+Microsoft Presidio's open-source PII detection test datasets and pattern library are genuinely public and directly reusable for building the detection rules.
+
+Generate a small self-made list of fake sensitive text snippets (names, account numbers, salary figures) covering common leak patterns — real company data should never be used for this test set.
+
+
+
+project_name: SecurePrompt
+
+Problem Statement :
+With the rapid adoption of AI assistants like ChatGPT, Claude, and Gemini, employees and
+common users often paste confidential information into public AI chatbots without realizing
+the security implications.
+This can unintentionally expose:
+ Personally Identifiable Information (PII)
+ Financial information
+ Client and project details
+ API keys and credentials
+ Internal company documents
+ Business strategies
+Current solutions either block prompts completely or lack explainability, reducing productivity
+and frustrating employees.
+
+Proposed Solution :
+We propose an AI-powered Browser Extension that acts as an intelligent security gateway
+between employees and AI chatbots.
+Before a prompt is sent, the extension automatically:
+ Detects sensitive information using Microsoft Presidio, Regex, and custom enterprise
+detection rules.
+ Calculates an explainable risk score.
+ Explains why each detected item is sensitive.
+ Gives users complete control by allowing them to:
+o Generate a privacy-safe version of the prompt
+o Send the original prompt after understanding the associated risks
+ Uses a self-hosted open-source LLM (llama 3.1 (exisitng local model in my device)) to rewrite prompts while preserving
+the user's intent.
+The solution follows the principle:
+"Educate users instead of simply blocking them."
+
+the entire description
+
+Entire architecture:
+
+WORKFLOW 1 — USER → BROWSER EXTENSION
+=====================================
+
+User
+  │
+  ▼
+Opens ChatGPT / Claude / Gemini
+  │
+  ▼
+Types Prompt
+  │
+  ▼
+Chrome Extension (Manifest V3)
+  │
+  ├── Content Script
+  │      └── Captures prompt before submission
+  │
+  └── Background Service Worker
+         └── Handles extension communication
+  │
+  ▼
+Send Prompt → FastAPI Backend
+
+
+WORKFLOW 2 — PROMPT → SECURITY ANALYSIS
+=======================================
+
+FastAPI
+  │
+  ▼
+Prompt Analysis Pipeline
+  │
+  ├───────────────┬──────────────────┐
+  ▼               ▼                  ▼
+Microsoft       Regex            Custom Rules
+Presidio        Engine           / Recognizers
+  │               │                  │
+  │               │                  │
+  └───────────────┴──────────────────┘
+                  │
+                  ▼
+           Detected Entities
+                  │
+                  ├── PII
+                  ├── Email
+                  ├── Phone
+                  ├── API Keys
+                  ├── JWT
+                  ├── Credentials
+                  ├── Client Data
+                  ├── Internal Projects
+                  └── Internal URLs
+                  │
+                  ▼
+             Risk Engine
+                  │
+                  ▼
+             Risk Score 0–100
+                  │
+                  ▼
+          LOW / MEDIUM / HIGH
+                  │
+                  ▼
+             Explanation
+
+
+WORKFLOW 3 — USER DECISION
+==========================
+
+Security Analysis
+       │
+       ▼
+Browser Warning UI
+       │
+       ├──────────────────────────┐
+       ▼                          ▼
+"Send Original"            "Generate Safe Prompt"
+       │                          │
+       │                          ▼
+       │                    Rewriting Pipeline
+       │                          │
+       │                          ▼
+       │                    Llama 3.1 / Phi-4-mini
+       │                          │
+       │                          ▼
+       │                    Privacy-Safe Prompt
+       │                          │
+       │                          ▼
+       │                    Show Before / After
+       │                          │
+       │                          ▼
+       │                    User Approves
+       │                          │
+       └──────────────┬───────────┘
+                      ▼
+               Send Prompt
+                      │
+                      ▼
+              ChatGPT / Claude /
+                  Gemini
+
+
+WORKFLOW 4 — LLM REWRITING
+==========================
+
+Original Prompt
+      │
+      ▼
+Detected Sensitive Entities
+      │
+      ▼
+System Prompt
+      │
+      ├── Preserve user intent
+      ├── Remove sensitive information
+      ├── Generalize private entities
+      ├── Never reproduce credentials
+      └── Do not change the requested task
+      │
+      ▼
+Llama 3.1 / Phi-4-mini
+      │
+      ▼
+Privacy-Safe Prompt
+      │
+      ▼
+Return to Chrome Extension
+
+
+WORKFLOW 5 — COMPLETE SYSTEM
+============================
+
+                    USER
+                     │
+                     ▼
+          ┌────────────────────┐
+          │ Chrome Extension   │
+          │   Manifest V3      │
+          └─────────┬──────────┘
+                    │
+                    ▼
+             ┌─────────────┐
+             │   FastAPI   │
+             └──────┬──────┘
+                    │
+                    ▼
+        ┌─────────────────────────┐
+        │   SECURITY PIPELINE     │
+        │                         │
+        │  ┌─────────┐            │
+        │  │Presidio │            │
+        │  └────┬────┘            │
+        │       │                 │
+        │  ┌────▼────┐            │
+        │  │  Regex  │            │
+        │  └────┬────┘            │
+        │       │                 │
+        │  ┌────▼────────┐       │
+        │  │Custom Rules │       │
+        │  └────┬────────┘       │
+        │       │                 │
+        └───────┼─────────────────┘
+                ▼
+          ┌─────────────┐
+          │ Risk Engine │
+          └──────┬──────┘
+                 │
+          ┌──────▼──────┐
+          │ Risk Score  │
+          │ + Reasoning │
+          └──────┬──────┘
+                 │
+                 ▼
+           ┌───────────┐
+           │ User UI   │
+           └─────┬─────┘
+                 │
+          ┌──────┴───────┐
+          │              │
+          ▼              ▼
+       ORIGINAL        SAFE
+          │              │
+          │              ▼
+          │        ┌──────────────┐
+          │        │ Llama 3.1 /  │
+          │        │ Phi-4-mini  │
+          │        └──────┬───────┘
+          │               │
+          │               ▼
+          │        Safe Prompt
+          │               │
+          └───────┬───────┘
+                  ▼
+          ChatGPT / Claude /
+              Gemini
+
+
+WORKFLOW 6 — DEPLOYMENT
+=======================
+
+                 GitHub
+                    │
+                    ▼
+                  Docker
+                    │
+                    ▼
+             ┌──────────────┐
+             │ FastAPI      │
+             │ Backend      │
+             └──────┬───────┘
+                    │
+                    ▼
+                 Render
+                    │
+                    ▼
+             Public HTTPS API
+                    │
+                    ▼
+             Chrome Extension
+                    │
+                    ▼
+          ChatGPT / Claude / Gemini
+
+
+LLM DEPLOYMENT
+==============
+
+             Llama 3.1 / Phi-4-mini
+                       │
+                       ▼
+                    Ollama
+                  OR vLLM
+                       │
+                       ▼
+               Local GPU / GPU VM
+                       │
+                       ▼
+                FastAPI /rewrite
+                       │
+                       ▼
+               Safe Prompt
