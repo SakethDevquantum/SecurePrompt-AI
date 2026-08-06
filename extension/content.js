@@ -24,15 +24,19 @@ function getSubmitButton() {
   );
 }
 
+// Global re-entrancy lock to prevent submit loops & freezes
+let isBypassing = false;
+
 // Attach listeners to DOM
 document.addEventListener("keydown", handleKeydown, true);
 document.addEventListener("click", handleClick, true);
 
 function handleKeydown(event) {
+  if (isBypassing) return;
   const input = getChatInput();
   if (input && (event.target === input || input.contains(event.target)) && event.key === "Enter" && !event.shiftKey) {
     const text = input.value || input.innerText;
-    if (text.trim().length > 0) {
+    if (text && text.trim().length > 0) {
       event.preventDefault();
       event.stopPropagation();
       initiateSecurityAudit(text, input);
@@ -41,12 +45,13 @@ function handleKeydown(event) {
 }
 
 function handleClick(event) {
+  if (isBypassing) return;
   const button = getSubmitButton();
   if (button && button.contains(event.target)) {
     const input = getChatInput();
     if (input) {
       const text = input.value || input.innerText;
-      if (text.trim().length > 0) {
+      if (text && text.trim().length > 0) {
         event.preventDefault();
         event.stopPropagation();
         initiateSecurityAudit(text, input);
@@ -55,26 +60,83 @@ function handleClick(event) {
   }
 }
 
+// Local fallback sanitizer in JS if background/LLM connection fails
+function localFallbackSanitize(text, entities) {
+  let safe = text || "";
+  const sorted = (entities || []).slice().sort((a, b) => (b.item || "").length - (a.item || "").length);
+  for (const ent of sorted) {
+    if (!ent.item) continue;
+    let ph = `[${ent.type || "Private Data"}]`;
+    const etype = (ent.type || "").toUpperCase();
+    if (etype.includes("EMAIL")) ph = "[Email Address]";
+    else if (etype.includes("PHONE") || etype.includes("NUMBER")) ph = "[Phone Number]";
+    else if (etype.includes("DATE")) ph = "[Date of Birth]";
+    else if (etype.includes("ADDRESS") || etype.includes("LOCATION")) ph = "[Address]";
+    else if (etype.includes("PERSON") || etype.includes("NAME")) ph = "[Name]";
+    else if (etype.includes("CREDENTIAL") || etype.includes("KEY")) ph = "[API Key]";
+    safe = safe.split(ent.item).join(ph);
+  }
+  safe = safe.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[Email Address]");
+  safe = safe.replace(/\bsk-[a-zA-Z0-9-]{12,}\b/g, "[API Key]");
+  safe = safe.replace(/\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[Phone Number]");
+  safe = safe.replace(/\b\d{4}[-/]\d{2}[-/]\d{2}\b/g, "[Date of Birth]");
+  return safe;
+}
+
 // Send input to background worker to scan
 function initiateSecurityAudit(text, inputElement) {
-  console.log("[SecurePrompt] Intercepted prompt: ", text.substring(0, 40) + "...");
+  if (isBypassing) return;
   
-  chrome.runtime.sendMessage({ action: "analyzePrompt", prompt: text }, (response) => {
-    if (response && response.success) {
-      const analysis = response.analysis;
-      if (analysis.riskScore >= 40) {
-        // High/Medium Risk detected! Render modal warning
-        showSecurityPopup(text, analysis, inputElement);
-      } else {
-        // Safe prompt, release it to the platform
-        bypassAndSubmit(text, inputElement);
-      }
-    } else {
-      // API call failed, bypass and send default
-      console.warn("[SecurePrompt] API analysis failed. Bypassing check.");
+  if (!chrome.runtime || !chrome.runtime.id) {
+    console.warn("[SecurePrompt] Extension context invalidated. Bypassing check.");
+    bypassAndSubmit(text, inputElement);
+    return;
+  }
+
+  console.log("[SecurePrompt] Intercepted prompt: ", text.substring(0, 40) + "...");
+
+  let isHandled = false;
+  // 4-second safety timeout so webpage never hangs
+  const timeoutId = setTimeout(() => {
+    if (!isHandled) {
+      isHandled = true;
+      console.warn("[SecurePrompt] Analysis timed out. Releasing input.");
       bypassAndSubmit(text, inputElement);
     }
-  });
+  }, 4000);
+
+  try {
+    chrome.runtime.sendMessage({ action: "analyzePrompt", prompt: text }, (response) => {
+      if (isHandled) return;
+      isHandled = true;
+      clearTimeout(timeoutId);
+
+      if (chrome.runtime.lastError) {
+        console.warn("[SecurePrompt] Runtime error:", chrome.runtime.lastError.message);
+        bypassAndSubmit(text, inputElement);
+        return;
+      }
+
+      if (response && response.success) {
+        const analysis = response.analysis;
+        if (analysis.riskScore >= 40) {
+          showSecurityPopup(text, analysis, inputElement);
+        } else {
+          bypassAndSubmit(text, inputElement);
+        }
+      } else {
+        console.warn("[SecurePrompt] API analysis failed. Bypassing check.");
+        bypassAndSubmit(text, inputElement);
+      }
+    });
+  } catch (e) {
+    if (!isHandled) {
+      isHandled = true;
+      clearTimeout(timeoutId);
+      console.warn("[SecurePrompt] Messaging error:", e);
+      bypassAndSubmit(text, inputElement);
+    }
+  }
 }
 
 // Inject warning modal directly into chatbot DOM
@@ -160,19 +222,48 @@ function showSecurityPopup(originalText, analysis, inputElement) {
 
   // Attach buttons listeners
   document.getElementById("sp-btn-rewrite").addEventListener("click", () => {
-    document.getElementById("sp-btn-rewrite").innerText = "Rewriting with Llama 3.1...";
-    chrome.runtime.sendMessage({
-      action: "rewritePrompt",
-      prompt: originalText,
-      entities: analysis.entities
-    }, (rewriteResponse) => {
-      overlay.remove();
-      if (rewriteResponse && rewriteResponse.success) {
-        showRewriteReview(originalText, rewriteResponse.rewrite.safePrompt, inputElement);
-      } else {
-        alert("Failed to query local LLM rewriter.");
+    const btn = document.getElementById("sp-btn-rewrite");
+    btn.innerText = "Rewriting with Llama 3.1...";
+    btn.disabled = true;
+    btn.style.opacity = "0.7";
+
+    let isHandled = false;
+    const timeoutId = setTimeout(() => {
+      if (!isHandled) {
+        isHandled = true;
+        overlay.remove();
+        const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+        showRewriteReview(originalText, safeFallback, inputElement);
       }
-    });
+    }, 6000);
+
+    try {
+      chrome.runtime.sendMessage({
+        action: "rewritePrompt",
+        prompt: originalText,
+        entities: analysis.entities
+      }, (rewriteResponse) => {
+        if (isHandled) return;
+        isHandled = true;
+        clearTimeout(timeoutId);
+        overlay.remove();
+
+        if (rewriteResponse && rewriteResponse.success && rewriteResponse.rewrite && rewriteResponse.rewrite.safePrompt) {
+          showRewriteReview(originalText, rewriteResponse.rewrite.safePrompt, inputElement);
+        } else {
+          const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+          showRewriteReview(originalText, safeFallback, inputElement);
+        }
+      });
+    } catch (e) {
+      if (!isHandled) {
+        isHandled = true;
+        clearTimeout(timeoutId);
+        overlay.remove();
+        const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+        showRewriteReview(originalText, safeFallback, inputElement);
+      }
+    }
   });
 
   document.getElementById("sp-btn-original").addEventListener("click", () => {
@@ -316,40 +407,50 @@ function showFinalWarning(originalText, analysis, inputElement) {
 
 // Input values injection and simulate submission
 function bypassAndSubmit(text, inputElement) {
-  inputElement.focus();
-  
-  if (inputElement.tagName === "TEXTAREA" || inputElement.tagName === "INPUT") {
-    inputElement.value = text;
-    // Dispatch input event for framework bindings to capture changes
-    inputElement.dispatchEvent(new Event("input", { bubbles: true }));
-  } else {
-    // For contenteditable elements, use execCommand to ensure React/Lexical framework state updates correctly
-    try {
-      document.execCommand("selectAll", false, null);
-      document.execCommand("insertText", false, text);
-    } catch (e) {
-      console.warn("[SecurePrompt] execCommand fallback:", e);
-      inputElement.innerText = text;
+  isBypassing = true;
+
+  try {
+    inputElement.focus();
+    if (inputElement.tagName === "TEXTAREA" || inputElement.tagName === "INPUT") {
+      inputElement.value = text;
       inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+    } else {
+      try {
+        document.execCommand("selectAll", false, null);
+        document.execCommand("insertText", false, text);
+      } catch (e) {
+        console.warn("[SecurePrompt] execCommand fallback:", e);
+        inputElement.innerText = text;
+        inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+      }
     }
+  } catch (e) {
+    console.error("[SecurePrompt] Text insertion error:", e);
   }
 
-  // Trigger submission on chatbot page
+  // Trigger submission on chatbot page with lock cleanup
   setTimeout(() => {
-    const submitBtn = getSubmitButton();
-    if (submitBtn) {
-      submitBtn.click();
-    } else {
-      // Fallback submit by pressing Enter inside the element
-      const enterEvent = new KeyboardEvent("keydown", {
-        key: "Enter",
-        code: "Enter",
-        keyCode: 13,
-        which: 13,
-        bubbles: true,
-        cancelable: true
-      });
-      inputElement.dispatchEvent(enterEvent);
+    try {
+      const submitBtn = getSubmitButton();
+      if (submitBtn) {
+        submitBtn.click();
+      } else {
+        const enterEvent = new KeyboardEvent("keydown", {
+          key: "Enter",
+          code: "Enter",
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+          cancelable: true
+        });
+        inputElement.dispatchEvent(enterEvent);
+      }
+    } catch (e) {
+      console.error("[SecurePrompt] Submit trigger error:", e);
+    } finally {
+      setTimeout(() => {
+        isBypassing = false;
+      }, 800);
     }
   }, 150);
 }

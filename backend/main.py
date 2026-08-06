@@ -110,7 +110,7 @@ if analyzer:
     )
     analyzer.registry.add_recognizer(address_recognizer)
 
-    # 6. Custom Enterprise Keyword Recognizer (Client names, Projects, Departments)
+
     enterprise_keywords = [
         "Apollo", "Project Apollo", "Saketh", "SecurePrompt", "SentinelPrompt"
     ]
@@ -160,7 +160,7 @@ def fallback_regex_scanner(text: str) -> List[Dict[str, Any]]:
     sk_keys = re.findall(r"\bsk-[a-zA-Z0-9-]{12,}\b", text)
     for key in sk_keys:
         entities.append({"item": key, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
-        
+
     # Check for prefixed API Keys
     keys = re.findall(r"(?:api_key|apikey|secret|token|password|passwd)\s*[:=]\s*['\"]?([a-zA-Z0-9_-]{10,})['\"]?", text, re.IGNORECASE)
     for key in keys:
@@ -313,7 +313,6 @@ async def analyze_prompt(request: AnalyzeRequest):
         entities=mapped_entities
     )
 
-
 @app.post("/rewrite", response_model=RewriteResponse)
 async def rewrite_prompt(request: RewriteRequest):
     prompt_text = request.prompt
@@ -344,8 +343,11 @@ async def rewrite_prompt(request: RewriteRequest):
         f"Safe Rewritten Prompt:"
     )
 
-    # 3. Request local Ollama daemon
+    # 3. Request local Ollama daemon with a tight timeout
     ollama_url = "http://localhost:11434/api/generate"
+    safe_prompt = prompt_text
+    used_model = model_name
+
     try:
         response = requests.post(
             ollama_url,
@@ -358,32 +360,32 @@ async def rewrite_prompt(request: RewriteRequest):
                 },
                 "stream": False
             },
-            timeout=15.0
+            timeout=7.0
         )
         if response.status_code == 200:
             result = response.json()
-            safe_prompt = result.get("response", "").strip()
-            # Post-processing: Remove any markdown code block wraps if the LLM added them
-            if safe_prompt.startswith("```") and safe_prompt.endswith("```"):
-                lines = safe_prompt.split("\n")
+            llm_output = result.get("response", "").strip()
+            if llm_output.startswith("```") and llm_output.endswith("```"):
+                lines = llm_output.split("\n")
                 if len(lines) > 2:
-                    safe_prompt = "\n".join(lines[1:-1])
-                    
-            logger.info(f"Ollama rewrite completed: {safe_prompt[:50]}...")
-            return RewriteResponse(safePrompt=safe_prompt, modelUsed=model_name)
+                    llm_output = "\n".join(lines[1:-1])
+            if len(llm_output) > 5:
+                safe_prompt = llm_output
+                logger.info(f"Ollama rewrite received: {safe_prompt[:50]}...")
         else:
-            logger.warning(f"Ollama returned error code {response.status_code}. Using local deterministic rewrite.")
+            used_model = "Deterministic Sanitizer Engine"
+            logger.warning(f"Ollama returned status {response.status_code}. Using deterministic sanitizer.")
     except Exception as e:
-        logger.warning(f"Ollama connection error: {e}. Falling back to deterministic rewrite.")
+        used_model = "Deterministic Sanitizer Engine"
+        logger.warning(f"Ollama connection/timeout ({e}). Using deterministic sanitizer.")
 
-    # 4. Fallback: Deterministic String Replacement (If Ollama is offline/failed)
-    safe_prompt = prompt_text
-    
-    # Sort entities by length descending to replace larger substrings first
+    # 4. Mandatory Guarantee Pass: Deterministic String Replacement on all detected entities
     sorted_entities = sorted(entities, key=lambda x: len(x.get("item", "")), reverse=True)
     
     for ent in sorted_entities:
         item = ent.get("item", "")
+        if not item or len(item.strip()) == 0:
+            continue
         etype = ent.get("type", "").upper()
         
         # Determine placeholder
@@ -413,9 +415,15 @@ async def rewrite_prompt(request: RewriteRequest):
             placeholder = "[Salary]"
             
         safe_prompt = re.sub(re.escape(item), placeholder, safe_prompt)
-        
-    logger.info("Fallback deterministic rewrite completed.")
-    return RewriteResponse(safePrompt=safe_prompt, modelUsed="Deterministic Fallback Engine")
+
+    # 5. Secondary Regex Scrubbing Pass: catch any remaining raw emails, API keys, phone numbers, or dates
+    safe_prompt = re.sub(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[Email Address]", safe_prompt)
+    safe_prompt = re.sub(r"\bsk-[a-zA-Z0-9-]{12,}\b", "[API Key]", safe_prompt)
+    safe_prompt = re.sub(r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "[Phone Number]", safe_prompt)
+    safe_prompt = re.sub(r"\b\d{4}[-/]\d{2}[-/]\d{2}\b", "[Date of Birth]", safe_prompt)
+
+    logger.info(f"Final sanitized rewrite prompt ready ({used_model}).")
+    return RewriteResponse(safePrompt=safe_prompt, modelUsed=used_model)
 
 if __name__ == "__main__":
     import uvicorn
