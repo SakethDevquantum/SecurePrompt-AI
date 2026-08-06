@@ -1,6 +1,7 @@
 import re
 import json
 import logging
+import math
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,12 +35,11 @@ except Exception as e:
     analyzer = None
 
 # Custom Enterprise Recognizers & Rules
-# Derived strictly from prompt.txt and idealogy.jpg terms
+# Multi-delimiter & High-Entropy Token Recognizers
 
-# Custom Regex Patterns for Tier 0 Scanning
 api_key_pattern = Pattern(
     name="api_key",
-    regex=r"(?:api_key|apikey|secret|token|passwd|password)\s*[:=]\s*['\"]?([a-zA-Z0-9_]{10,})['\"]?",
+    regex=r"(?i)\b(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?",
     score=0.95
 )
 
@@ -47,6 +47,12 @@ sk_key_pattern = Pattern(
     name="sk_key",
     regex=r"\bsk-[a-zA-Z0-9-]{12,}\b",
     score=0.95
+)
+
+cloud_aq_pattern = Pattern(
+    name="cloud_aq_token",
+    regex=r"\bAQ\.[a-zA-Z0-9._\-]{15,}\b",
+    score=0.98
 )
 
 jwt_pattern = Pattern(
@@ -78,7 +84,7 @@ if analyzer:
     # 1. API Keys & Secrets Recognizer
     api_key_recognizer = PatternRecognizer(
         supported_entity="CREDENTIALS",
-        patterns=[api_key_pattern, sk_key_pattern]
+        patterns=[api_key_pattern, sk_key_pattern, cloud_aq_pattern]
     )
     analyzer.registry.add_recognizer(api_key_recognizer)
 
@@ -109,7 +115,6 @@ if analyzer:
         patterns=[address_pattern]
     )
     analyzer.registry.add_recognizer(address_recognizer)
-
 
     enterprise_keywords = [
         "Apollo", "Project Apollo", "Saketh", "SecurePrompt", "SentinelPrompt"
@@ -147,25 +152,63 @@ class RewriteResponse(BaseModel):
     modelUsed: str
 
 
+# Helper: Standalone & Multi-Delimiter Security Token Recognizer
+def detect_all_tokens_and_keys(text: str) -> List[Dict[str, Any]]:
+    tokens = []
+    
+    # 1. Flexible Prefixed Key Recognizer (handles :, =, -, spaces, etc.)
+    prefix_pattern = r"(?i)\b(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?"
+    for m in re.finditer(prefix_pattern, text):
+        matched_val = m.group(1)
+        full_match = m.group(0)
+        tokens.append({"item": matched_val, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
+        tokens.append({"item": full_match, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
+
+    # 2. Known Cloud & Security Token Signatures
+    cloud_patterns = [
+        r"\bsk-[a-zA-Z0-9._\-]{10,}\b",
+        r"\bAIzaSy[a-zA-Z0-9._\-]{33}\b",
+        r"\bAKIA[0-9A-Z]{16}\b",
+        r"\bAQ\.[a-zA-Z0-9._\-]{15,}\b",
+        r"\b(?:ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36}\b",
+        r"\bgithub_pat_[a-zA-Z0-9_]{80,}\b",
+        r"\bxox[baprs]-[a-zA-Z0-9-]{10,}\b",
+        r"eyJ[a-zA-Z0-9-_]+\.eyJ[a-zA-Z0-9-_]+\.[a-zA-Z0-9-__]+"
+    ]
+    for cp in cloud_patterns:
+        for m in re.finditer(cp, text):
+            tokens.append({"item": m.group(0), "type": "CREDENTIALS", "severity": "High", "confidence": 0.98})
+
+    # 3. Standalone High-Entropy Security Token Scanner
+    words = re.findall(r"\b[a-zA-Z0-9._\-]{20,}\b", text)
+    for word in words:
+        if word.startswith("http://") or word.startswith("https://") or word.isdigit():
+            continue
+        has_upper = any(c.isupper() for c in word)
+        has_lower = any(c.islower() for c in word)
+        has_num = any(c.isdigit() for c in word)
+        has_spec = any(c in "._-" for c in word)
+        
+        prob = [float(word.count(c)) / len(word) for c in set(word)]
+        entropy = -sum([p * math.log2(p) for p in prob])
+        
+        if (has_upper and has_lower and (has_num or has_spec)) and entropy >= 3.5:
+            tokens.append({"item": word, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
+
+    return tokens
+
+
 # Helper: Local Fallback Regex Scanner (If Presidio is not fully initialized)
 def fallback_regex_scanner(text: str) -> List[Dict[str, Any]]:
     entities = []
+    
+    # Run multi-delimiter and high entropy token detector
+    entities.extend(detect_all_tokens_and_keys(text))
     
     # Check for emails
     emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
     for email in emails:
         entities.append({"item": email, "type": "EMAIL_ADDRESS", "severity": "High", "confidence": 0.95})
-        
-    # Check for API Keys (sk-*)
-    sk_keys = re.findall(r"\bsk-[a-zA-Z0-9-]{12,}\b", text)
-    for key in sk_keys:
-        entities.append({"item": key, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
-
-    # Check for prefixed API Keys
-    keys = re.findall(r"(?:api_key|apikey|secret|token|password|passwd)\s*[:=]\s*['\"]?([a-zA-Z0-9_-]{10,})['\"]?", text, re.IGNORECASE)
-    for key in keys:
-        match_str = re.search(r"['\"]?" + re.escape(key) + r"['\"]?", text)
-        entities.append({"item": match_str.group() if match_str else key, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
         
     # Check for Phone Numbers
     phone_numbers = re.findall(r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", text)
@@ -212,6 +255,9 @@ async def analyze_prompt(request: AnalyzeRequest):
     
     findings = []
     
+    # Always include high-entropy & multi-delimiter token scan results
+    findings.extend(detect_all_tokens_and_keys(prompt_text))
+    
     # 1. Try Presidio Scanning
     if analyzer:
         try:
@@ -240,10 +286,10 @@ async def analyze_prompt(request: AnalyzeRequest):
                 })
         except Exception as e:
             logger.error(f"Presidio analyze error: {e}. Using fallback scanner.")
-            findings = fallback_regex_scanner(prompt_text)
+            findings.extend(fallback_regex_scanner(prompt_text))
     else:
         # Fallback to local custom regex scanner if Presidio isn't loaded
-        findings = fallback_regex_scanner(prompt_text)
+        findings.extend(fallback_regex_scanner(prompt_text))
         
     # Filter findings:
     # 1. Skip locations/addresses if they contain the word "example" (case-insensitive)
@@ -416,11 +462,22 @@ async def rewrite_prompt(request: RewriteRequest):
             
         safe_prompt = re.sub(re.escape(item), placeholder, safe_prompt)
 
-    # 5. Secondary Regex Scrubbing Pass: catch any remaining raw emails, API keys, phone numbers, or dates
+    # 5. Secondary Regex & Token Scrubbing Pass: catch any remaining raw emails, tokens, API keys, phone numbers, or dates
     safe_prompt = re.sub(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[Email Address]", safe_prompt)
+    safe_prompt = re.sub(r"(?i)\b(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?", "[API Key]", safe_prompt)
+    safe_prompt = re.sub(r"\bAQ\.[a-zA-Z0-9._\-]{15,}\b", "[API Key]", safe_prompt)
+    safe_prompt = re.sub(r"\bAIzaSy[a-zA-Z0-9._\-]{33}\b", "[API Key]", safe_prompt)
+    safe_prompt = re.sub(r"\bAKIA[0-9A-Z]{16}\b", "[API Key]", safe_prompt)
     safe_prompt = re.sub(r"\bsk-[a-zA-Z0-9-]{12,}\b", "[API Key]", safe_prompt)
     safe_prompt = re.sub(r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "[Phone Number]", safe_prompt)
     safe_prompt = re.sub(r"\b\d{4}[-/]\d{2}[-/]\d{2}\b", "[Date of Birth]", safe_prompt)
+
+    # Scrub standalone high-entropy security tokens
+    token_words = re.findall(r"\b[a-zA-Z0-9._\-]{20,}\b", safe_prompt)
+    for tw in token_words:
+        if not (tw.startswith("http://") or tw.startswith("https://") or tw.isdigit()):
+            if (any(c.isupper() for c in tw) and any(c.islower() for c in tw) and (any(c.isdigit() for c in tw) or any(c in "._-" for c in tw))):
+                safe_prompt = re.sub(re.escape(tw), "[API Key]", safe_prompt)
 
     logger.info(f"Final sanitized rewrite prompt ready ({used_model}).")
     return RewriteResponse(safePrompt=safe_prompt, modelUsed=used_model)

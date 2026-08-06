@@ -77,6 +77,10 @@ function localFallbackSanitize(text, entities) {
     safe = safe.split(ent.item).join(ph);
   }
   safe = safe.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[Email Address]");
+  safe = safe.replace(/(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?/gi, "[API Key]");
+  safe = safe.replace(/\bAQ\.[a-zA-Z0-9._\-]{15,}\b/g, "[API Key]");
+  safe = safe.replace(/\bAIzaSy[a-zA-Z0-9._\-]{33}\b/g, "[API Key]");
+  safe = safe.replace(/\bAKIA[0-9A-Z]{16}\b/g, "[API Key]");
   safe = safe.replace(/\bsk-[a-zA-Z0-9-]{12,}\b/g, "[API Key]");
   safe = safe.replace(/\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[Phone Number]");
   safe = safe.replace(/\b\d{4}[-/]\d{2}[-/]\d{2}\b/g, "[Date of Birth]");
