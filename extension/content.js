@@ -67,7 +67,7 @@ function getChatInput() {
   return candidates.length > 0 ? candidates[0] : null;
 }
 
-// Helper: Determine if an element is a Send / Submit button
+// Helper: Determine if an element is strictly the Chat Input's Send / Submit button
 function isSendButton(el) {
   if (!el) return false;
 
@@ -76,17 +76,18 @@ function isSendButton(el) {
 
   const testId = (btn.getAttribute("data-testid") || "").toLowerCase();
   const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
-  const idClass = (btn.id + " " + btn.className).toLowerCase();
-  const text = (btn.innerText || "").toLowerCase();
+  const type = (btn.getAttribute("type") || "").toLowerCase();
 
-  if (testId.includes("send") || testId.includes("submit") || testId.includes("grok") || testId.includes("composer")) return true;
-  if (aria.includes("send") || aria.includes("submit") || aria.includes("generate") || aria.includes("ask") || aria.includes("prompt")) return true;
-  if (idClass.includes("send") || idClass.includes("submit") || idClass.includes("composer")) return true;
-  if (/^send$|^submit$|^generate$/.test(text.trim())) return true;
+  // 1. Explicit ChatGPT / Grok / Claude send button testids or aria-labels
+  if (testId === "send-button" || testId.includes("send-button") || testId.includes("grok-send")) return true;
+  if (/^send(\s+prompt|\s+message)?$/i.test(aria.trim()) || aria === "send prompt" || aria === "send message" || aria === "send") return true;
 
-  // Check SVG or path inside form
-  if ((btn.querySelector && (btn.querySelector('svg') || btn.querySelector('path'))) && btn.closest('form, [class*="composer"], [class*="chat"]')) {
-    return true;
+  // 2. Submit button inside chat composer form
+  const parentComposer = btn.closest ? btn.closest('form, [class*="composer"], fieldset') : null;
+  if (parentComposer) {
+    if (type === "submit" || testId.includes("send") || /send|submit/i.test(aria)) {
+      return true;
+    }
   }
 
   return false;
@@ -122,15 +123,12 @@ function getPromptText(inputElement, targetElement) {
 // Global re-entrancy lock to prevent submit loops & freezes
 let isBypassing = false;
 
-// Attach listeners to DOM (useCapture = true to intercept before framework state updates)
+// Attach listeners ONLY for Enter keypress and Send button click
 document.addEventListener("keydown", handleKeydown, true);
-document.addEventListener("pointerdown", handlePointerOrClick, true);
-document.addEventListener("mousedown", handlePointerOrClick, true);
-document.addEventListener("click", handlePointerOrClick, true);
-document.addEventListener("submit", handleFormSubmit, true);
+document.addEventListener("click", handleClick, true);
 
 function handleKeydown(event) {
-  if (isBypassing) return;
+  if (isBypassing || (event && event.isTrusted === false)) return;
   if (event.key !== "Enter" || event.shiftKey) return;
   
   const target = event.target;
@@ -148,8 +146,8 @@ function handleKeydown(event) {
   }
 }
 
-function handlePointerOrClick(event) {
-  if (isBypassing) return;
+function handleClick(event) {
+  if (isBypassing || (event && event.isTrusted === false)) return;
   if (!isAIChatbotActive()) return;
 
   const target = event.target;
@@ -163,22 +161,6 @@ function handlePointerOrClick(event) {
         event.stopImmediatePropagation();
         initiateSecurityAudit(text, inputEl);
       }
-    }
-  }
-}
-
-function handleFormSubmit(event) {
-  if (isBypassing) return;
-  if (!isAIChatbotActive()) return;
-
-  const inputEl = getChatInput() || document.querySelector('textarea, [contenteditable="true"]');
-  if (inputEl) {
-    const text = getPromptText(inputEl, null);
-    if (text && text.length > 0) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      initiateSecurityAudit(text, inputEl);
     }
   }
 }
@@ -625,7 +607,7 @@ function bypassAndSubmit(text, inputElement) {
     } finally {
       setTimeout(() => {
         isBypassing = false;
-      }, 800);
+      }, 2500);
     }
   }, 150);
 }
