@@ -167,32 +167,34 @@ def detect_all_tokens_and_keys(text: str) -> List[Dict[str, Any]]:
     # 2. Known Cloud & Security Token Signatures
     cloud_patterns = [
         r"\bsk-[a-zA-Z0-9._\-]{10,}\b",
+        r"\bhf_[a-zA-Z0-9]{20,}\b",
         r"\bAIzaSy[a-zA-Z0-9._\-]{33}\b",
         r"\bAKIA[0-9A-Z]{16}\b",
         r"\bAQ\.[a-zA-Z0-9._\-]{15,}\b",
         r"\b(?:ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36}\b",
         r"\bgithub_pat_[a-zA-Z0-9_]{80,}\b",
         r"\bxox[baprs]-[a-zA-Z0-9-]{10,}\b",
-        r"eyJ[a-zA-Z0-9-_]+\.eyJ[a-zA-Z0-9-_]+\.[a-zA-Z0-9-__]+"
+        r"eyJ[a-zA-Z0-9-_]+\.eyJ[a-zA-Z0-9-_]+\.[a-zA-Z0-9-__]+",
+        r"\b[a-zA-Z0-9/+=]{40}\b"
     ]
     for cp in cloud_patterns:
         for m in re.finditer(cp, text):
             tokens.append({"item": m.group(0), "type": "CREDENTIALS", "severity": "High", "confidence": 0.98})
 
     # 3. Standalone High-Entropy Security Token Scanner
-    words = re.findall(r"\b[a-zA-Z0-9._\-]{20,}\b", text)
+    words = re.findall(r"\b[a-zA-Z0-9._\-/+=]{20,}\b", text)
     for word in words:
-        if word.startswith("http://") or word.startswith("https://") or word.isdigit():
+        if word.startswith("http://") or word.startswith("https://") or word.isdigit() or len(word) < 20:
             continue
         has_upper = any(c.isupper() for c in word)
         has_lower = any(c.islower() for c in word)
         has_num = any(c.isdigit() for c in word)
-        has_spec = any(c in "._-" for c in word)
+        has_spec = any(c in "._-/+=" for c in word)
         
         prob = [float(word.count(c)) / len(word) for c in set(word)]
         entropy = -sum([p * math.log2(p) for p in prob])
         
-        if (has_upper and has_lower and (has_num or has_spec)) and entropy >= 3.5:
+        if (has_upper and has_lower and (has_num or has_spec)) and entropy >= 3.4:
             tokens.append({"item": word, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
 
     return tokens
@@ -313,34 +315,60 @@ async def analyze_prompt(request: AnalyzeRequest):
             seen.add(f["item"])
             deduped_findings.append(f)
 
-    # 2. Risk Engine calculation (0 - 100)
-    risk_score = 0
-    high_count = sum(1 for f in deduped_findings if f["severity"] == "High")
-    med_count = sum(1 for f in deduped_findings if f["severity"] == "Medium")
-    low_count = sum(1 for f in deduped_findings if f["severity"] == "Low")
-    
-    if high_count > 0:
-        # High-risk elements present
-        risk_score = min(98, 80 + (high_count * 5) + (med_count * 2))
-    elif med_count > 0:
-        # Medium-risk elements present
-        risk_score = min(75, 40 + (med_count * 8) + (low_count * 2))
-    elif low_count > 0:
-        # Low risk
-        risk_score = min(35, 10 + (low_count * 5))
-    else:
-        risk_score = 5 # clean prompt default score
-        
-    # Map Risk Levels
-    if risk_score >= 80:
-        risk_level = "HIGH RISK"
-        reason = "Prompt contains highly sensitive items such as email addresses, credentials, or internal subdomains."
-    elif risk_score >= 40:
-        risk_level = "MEDIUM RISK"
-        reason = "Prompt contains moderately sensitive items such as names, salary figures, or internal project names."
-    else:
+    # 2. Advanced Calibrated Risk Engine calculation (0 - 100) & Dynamic Assessment Generator
+    if not deduped_findings:
+        risk_score = 5
         risk_level = "LOW RISK"
-        reason = "No major sensitive items detected. The prompt is safe to transmit."
+        reason = "SAFE: No sensitive keys, credentials, or PII detected. Prompt is safe to transmit."
+    else:
+        # Category risk weight matrix
+        category_weights = {
+            "CREDENTIALS": 92,
+            "JWT": 90,
+            "US_BANK_NUMBER": 92,
+            "CREDIT_CARD": 94,
+            "SSN": 95,
+            "INTERNAL_URL": 82,
+            "EMAIL_ADDRESS": 78,
+            "FINANCIAL_DATA": 72,
+            "CLIENT_PROJECT_DATA": 60,
+            "PHONE_NUMBER": 55,
+            "PERSON": 50,
+            "DATE_TIME": 45,
+            "ADDRESS": 45,
+        }
+
+        # Find highest base severity weight
+        base_weights = [category_weights.get(f["type"].upper(), 40) for f in deduped_findings]
+        max_base = max(base_weights)
+        
+        # Incremental penalty for multiple sensitive items
+        extra_items_count = len(deduped_findings) - 1
+        calculated_score = max_base + (extra_items_count * 4)
+        risk_score = min(99, calculated_score)
+
+        # Generate accurate, itemized security explanations
+        types_found = list(set(f["type"].upper() for f in deduped_findings))
+        sample_items = [f"'{f['item'][:20]}...'" if len(f['item']) > 20 else f"'{f['item']}'" for f in deduped_findings[:3]]
+        items_str = ", ".join(sample_items)
+
+        if risk_score >= 75:
+            risk_level = "HIGH RISK"
+            if any(t in ["CREDENTIALS", "JWT", "CREDIT_CARD", "SSN", "US_BANK_NUMBER"] for t in types_found):
+                reason = f"CRITICAL SECURITY RISK: Prompt contains exposed secret keys/credentials ({items_str}) which can grant unauthorized system access or leak sensitive tokens."
+            elif "INTERNAL_URL" in types_found:
+                reason = f"HIGH INFRASTRUCTURE RISK: Prompt contains internal corporate URL subdomains ({items_str}) revealing private network routes."
+            else:
+                reason = f"HIGH PRIVACY RISK: Prompt contains highly sensitive personal identifiers ({items_str})."
+        elif risk_score >= 40:
+            risk_level = "MEDIUM RISK"
+            if "CLIENT_PROJECT_DATA" in types_found:
+                reason = f"CONFIDENTIAL DATA RISK: Prompt contains internal project codenames or client identifiers ({items_str})."
+            else:
+                reason = f"MEDIUM PRIVACY RISK: Prompt contains sensitive PII details ({items_str}) such as names, phone numbers, or dates."
+        else:
+            risk_level = "LOW RISK"
+            reason = f"LOW RISK: Minor non-critical matches detected ({items_str})."
 
     # Map back to API schema
     mapped_entities = [

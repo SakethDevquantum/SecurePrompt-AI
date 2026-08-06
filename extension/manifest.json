@@ -8,12 +8,7 @@
     "activeTab"
   ],
   "host_permissions": [
-    "https://chat.openai.com/*",
-    "https://chatgpt.com/*",
-    "https://claude.ai/*",
-    "https://gemini.google.com/*",
-    "https://copilot.microsoft.com/*",
-    "http://127.0.0.1:8000/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -21,11 +16,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://chat.openai.com/*",
-        "https://chatgpt.com/*",
-        "https://claude.ai/*",
-        "https://gemini.google.com/*",
-        "https://copilot.microsoft.com/*"
+        "<all_urls>"
       ],
       "js": ["content.js"],
       "run_at": "document_end"

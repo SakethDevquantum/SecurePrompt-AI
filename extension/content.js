@@ -3,25 +3,119 @@
 
 console.log("[SecurePrompt] Injected successfully. Monitoring text inputs...");
 
-// Helper: Locate standard chatbot input elements
+// Helper: Check if current page or DOM container is an active AI Chatbot platform
+function isAIChatbotActive() {
+  const url = window.location.href.toLowerCase();
+  const title = document.title.toLowerCase();
+  
+  const knownChatDomains = [
+    "chatgpt.com", "openai.com", "claude.ai", "gemini.google.com",
+    "copilot.microsoft.com", "grok.com", "x.ai", "perplexity.ai",
+    "poe.com", "huggingface.co", "deepseek.com", "mistral.ai", "character.ai",
+    "canva.com", "v0.dev", "bolt.new"
+  ];
+  
+  const hasDomain = knownChatDomains.some(d => url.includes(d));
+  const hasTitleKeyword = /chatgpt|claude|gemini|copilot|grok|perplexity|poe|deepseek|ai chat|assistant|canva|magic studio/.test(title);
+  const hasInput = getChatInput() !== null;
+
+  return hasDomain || hasTitleKeyword || hasInput;
+}
+
+// Helper: Locate standard & custom chatbot input elements
 function getChatInput() {
-  // Try specific prompt ID/class selectors first (ChatGPT, Claude, Gemini)
-  const specific = document.querySelector(
-    '#prompt-textarea, textarea[placeholder*="ChatGPT"], textarea[placeholder*="Claude"], [contenteditable="true"]#prompt-textarea, [data-placeholder*="prompt"]'
-  );
+  // 1. Specific Known AI Chatbot Selectors (ChatGPT, Claude, Gemini, Grok, Perplexity, DeepSeek, Poe, Canva AI, Copilot)
+  const specificSelectors = [
+    '#prompt-textarea',
+    'textarea[placeholder*="ChatGPT"]',
+    'textarea[placeholder*="Claude"]',
+    'div[data-placeholder*="Claude"]',
+    'div.ProseMirror[contenteditable="true"]',
+    'textarea[placeholder*="Ask"]',
+    'textarea[placeholder*="Message"]',
+    'textarea[placeholder*="Describe"]',
+    'textarea[placeholder*="Grok"]',
+    'textarea[placeholder*="Perplexity"]',
+    'textarea[placeholder*="DeepSeek"]',
+    'textarea[data-testid*="grok"]',
+    'div[contenteditable="true"]#prompt-textarea',
+    'div[contenteditable="true"][data-placeholder*="prompt"]',
+    'div[contenteditable="true"][data-placeholder*="Message"]',
+    'div[contenteditable="true"][aria-label*="Canva"]',
+    'div[contenteditable="true"][aria-label*="Assistant"]',
+    'div[contenteditable="true"][aria-label*="Chat"]'
+  ];
+  
+  const specific = document.querySelector(specificSelectors.join(', '));
   if (specific) return specific;
 
-  // Fallback to general structures
-  return document.querySelector(
-    'textarea, div[contenteditable="true"]'
-  );
+  // 2. Universal Heuristic Query: Any textarea or contenteditable div with AI/Chat keywords
+  const candidates = document.querySelectorAll('textarea, div[contenteditable="true"], input[type="text"]');
+  for (const el of candidates) {
+    const ph = (el.getAttribute("placeholder") || el.getAttribute("data-placeholder") || el.getAttribute("aria-label") || "").toLowerCase();
+    const idClass = (el.id + " " + el.className).toLowerCase();
+    
+    const isAiKeyword = /prompt|message|ask|chat|ai|assistant|copilot|claude|gemini|grok|gpt|deepseek|reply|describe|generate/.test(ph) ||
+                        /prompt|chat-input|chat-textarea|ai-input|composer|message-input|user-input/.test(idClass);
+                        
+    if (isAiKeyword) {
+      return el;
+    }
+  }
+
+  return null;
 }
 
 function getSubmitButton() {
-  // Matches typical send/submit buttons on modern chatbot UI platforms
-  return document.querySelector(
-    'button[data-testid*="send"], button[aria-label*="Send"], button[aria-label*="send"], button[class*="send"], button[id*="send"], button[class*="Submit"], button[id*="submit"]'
-  );
+  const specificSelectors = [
+    'button[data-testid*="send"]',
+    'button[data-testid*="grok"]',
+    'button[aria-label*="Send"]',
+    'button[aria-label*="send"]',
+    'button[aria-label*="Submit"]',
+    'button[aria-label*="Generate"]',
+    'button[aria-label*="Ask"]',
+    'button[class*="send"]',
+    'button[id*="send"]',
+    'button[class*="Submit"]',
+    'button[id*="submit"]'
+  ];
+  
+  const btn = document.querySelector(specificSelectors.join(', '));
+  if (btn) return btn;
+
+  const buttons = document.querySelectorAll('button');
+  for (const b of buttons) {
+    const label = (b.getAttribute("aria-label") || b.innerText || b.className || "").toLowerCase();
+    if (/send|submit|generate|ask/.test(label)) {
+      return b;
+    }
+  }
+
+  return null;
+}
+
+// Helper: Check if an element is editable
+function isEditableElement(el) {
+  if (!el) return false;
+  if (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && el.type === "text")) return true;
+  if (el.isContentEditable || el.getAttribute("contenteditable") === "true") return true;
+  if (el.closest && (el.closest('textarea') || el.closest('[contenteditable="true"]'))) return true;
+  return false;
+}
+
+// Helper: Extract prompt text reliably
+function getPromptText(inputElement, targetElement) {
+  let text = "";
+  if (targetElement) {
+    const container = targetElement.closest ? targetElement.closest('[contenteditable="true"], textarea') : null;
+    const activeEl = container || targetElement;
+    text = activeEl.value || activeEl.innerText || activeEl.textContent || "";
+  }
+  if (!text.trim() && inputElement) {
+    text = inputElement.value || inputElement.innerText || inputElement.textContent || "";
+  }
+  return text ? text.trim() : "";
 }
 
 // Global re-entrancy lock to prevent submit loops & freezes
@@ -33,28 +127,41 @@ document.addEventListener("click", handleClick, true);
 
 function handleKeydown(event) {
   if (isBypassing) return;
-  const input = getChatInput();
-  if (input && (event.target === input || input.contains(event.target)) && event.key === "Enter" && !event.shiftKey) {
-    const text = input.value || input.innerText;
-    if (text && text.trim().length > 0) {
-      event.preventDefault();
-      event.stopPropagation();
-      initiateSecurityAudit(text, input);
-    }
+  if (event.key !== "Enter" || event.shiftKey) return;
+  
+  const target = event.target;
+  if (!isEditableElement(target)) return;
+  if (!isAIChatbotActive()) return;
+
+  const inputEl = (target.closest ? target.closest('[contenteditable="true"], textarea') : null) || getChatInput() || target;
+  const text = getPromptText(inputEl, target);
+
+  if (text && text.length > 0) {
+    event.preventDefault();
+    event.stopPropagation();
+    initiateSecurityAudit(text, inputEl);
   }
 }
 
 function handleClick(event) {
   if (isBypassing) return;
-  const button = getSubmitButton();
-  if (button && button.contains(event.target)) {
-    const input = getChatInput();
-    if (input) {
-      const text = input.value || input.innerText;
-      if (text && text.trim().length > 0) {
+  if (!isAIChatbotActive()) return;
+
+  const target = event.target;
+  const btn = target.closest ? target.closest('button, [role="button"]') : null;
+  if (!btn) return;
+
+  const btnLabel = (btn.getAttribute("aria-label") || btn.innerText || btn.className || btn.id || "").toLowerCase();
+  const isSendBtn = /send|submit|generate|ask|grok/.test(btnLabel) || (btn.querySelector && btn.querySelector('svg'));
+
+  if (isSendBtn) {
+    const inputEl = getChatInput() || document.querySelector('textarea, [contenteditable="true"]');
+    if (inputEl) {
+      const text = getPromptText(inputEl, target);
+      if (text && text.length > 0) {
         event.preventDefault();
         event.stopPropagation();
-        initiateSecurityAudit(text, input);
+        initiateSecurityAudit(text, inputEl);
       }
     }
   }
