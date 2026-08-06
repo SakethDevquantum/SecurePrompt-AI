@@ -23,7 +23,8 @@ const BACKEND_URL = "http://127.0.0.1:8000";
 export default function App() {
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'deployment'
   const [inputText, setInputText] = useState("");
-  const [selectedModel, setSelectedModel] = useState("phi4-mini"); // phi4-mini | llama3.1
+  const [availableModels, setAvailableModels] = useState(["phi4-mini:latest", "llama2-uncensored:7b", "llama3.1:latest"]);
+  const [selectedModel, setSelectedModel] = useState("phi4-mini:latest");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isRewriting, setIsRewriting] = useState(false);
   
@@ -38,6 +39,19 @@ export default function App() {
   // Re-write result
   const [rewrittenPrompt, setRewrittenPrompt] = useState("");
   const [rewriteModelUsed, setRewriteModelUsed] = useState("");
+
+  // Fetch installed Ollama models on mount
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/models`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.models && data.models.length > 0) {
+          setAvailableModels(data.models);
+          setSelectedModel(data.models[0]);
+        }
+      })
+      .catch(err => console.warn("Failed to load local models:", err));
+  }, []);
   
   // Simulated chat messages
   const [messages, setMessages] = useState([
@@ -250,8 +264,9 @@ export default function App() {
                 onChange={(e) => setSelectedModel(e.target.value)}
                 className="bg-transparent text-sky-400 border-none outline-none font-semibold cursor-pointer"
               >
-                <option value="phi4-mini" className="bg-[#0E1624]">phi4-mini</option>
-                <option value="llama3.1" className="bg-[#0E1624]">llama3.1</option>
+                {availableModels.map(m => (
+                  <option key={m} value={m} className="bg-[#0E1624] text-slate-100">{m}</option>
+                ))}
               </select>
             </div>
 

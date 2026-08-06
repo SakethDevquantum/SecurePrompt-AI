@@ -5,23 +5,37 @@
   <style>
     body {
       width: 260px;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: #080C14;
-      color: #F3F4F6;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0F172A;
+      color: #F8FAFC;
       margin: 0;
-      padding: 12px;
+      padding: 14px;
     }
     .header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      border-bottom: 1px solid #1F2E47;
-      padding-bottom: 8px;
+      justify-content: space-between;
+      border-bottom: 1px solid #1E293B;
+      padding-bottom: 10px;
       margin-bottom: 12px;
     }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-icon {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #0EA5E9;
+    }
     .title {
-      font-size: 13px;
-      font-weight: bold;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #F8FAFC;
       margin: 0;
     }
     .form-group {
@@ -30,50 +44,59 @@
     label {
       display: block;
       font-size: 10px;
-      color: #9CA3AF;
+      color: #64748B;
       text-transform: uppercase;
-      margin-bottom: 4px;
-      font-weight: bold;
+      letter-spacing: 0.5px;
+      margin-bottom: 5px;
+      font-weight: 600;
     }
     select {
       width: 100%;
-      background: #0E1624;
-      border: 1px solid #1F2E47;
-      color: #F3F4F6;
-      padding: 6px;
-      border-radius: 6px;
+      background: #0B0F17;
+      border: 1px solid #1E293B;
+      color: #F8FAFC;
+      padding: 7px 10px;
+      border-radius: 8px;
       font-size: 11px;
       outline: none;
+      font-family: inherit;
+    }
+    select:focus {
+      border-color: #0EA5E9;
     }
     .status-badge {
       display: flex;
       align-items: center;
-      gap: 6px;
-      font-size: 10px;
-      background: rgba(16, 185, 129, 0.1);
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 500;
+      background: rgba(16, 185, 129, 0.08);
       border: 1px solid rgba(16, 185, 129, 0.2);
       color: #10B981;
-      padding: 4px 8px;
-      border-radius: 6px;
+      padding: 6px 10px;
+      border-radius: 8px;
     }
     .footer {
-      font-size: 9px;
-      color: #6B7280;
+      font-size: 10px;
+      color: #64748B;
       text-align: center;
-      margin-top: 12px;
-      border-top: 1px solid #1F2E47;
-      padding-top: 8px;
+      margin-top: 14px;
+      border-top: 1px solid #1E293B;
+      padding-top: 10px;
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <span style="font-size: 16px;">🛡️</span>
-    <h3 class="title">SecurePrompt Settings</h3>
+    <div class="brand">
+      <span class="brand-icon"></span>
+      <h3 class="title">SecurePrompt</h3>
+    </div>
+    <span style="font-size: 10px; color: #64748B; background: #1E293B; padding: 2px 6px; border-radius: 4px;">v1.0</span>
   </div>
 
   <div class="form-group">
-    <label>Rewrite Model Choice</label>
+    <label>Local LLM Rewriter</label>
     <select id="model-select">
       <option value="phi4-mini">phi4-mini (2.5GB)</option>
       <option value="llama3.1">llama3.1 (4.9GB)</option>
@@ -81,15 +104,15 @@
   </div>
 
   <div class="form-group">
-    <label>Gateway Status</label>
+    <label>Protection Status</label>
     <div class="status-badge">
-      <span style="width: 6px; height: 6px; background: #10B981; border-radius: 50%;"></span>
-      <span>FastAPI Local Gateway Running</span>
+      <span style="width: 6px; height: 6px; background: #10B981; border-radius: 50%; display: inline-block;"></span>
+      <span>Gateway Active & Protection On</span>
     </div>
   </div>
 
   <div class="footer">
-    SecurePrompt v1.0.0 • Local LLM Sandboxed
+    Privacy-First Local Security Gateway
   </div>
 
   <script src="popup.js"></script>

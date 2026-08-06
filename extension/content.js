@@ -24,75 +24,72 @@ function isAIChatbotActive() {
 
 // Helper: Locate standard & custom chatbot input elements
 function getChatInput() {
-  // 1. Specific Known AI Chatbot Selectors (ChatGPT, Claude, Gemini, Grok, Perplexity, DeepSeek, Poe, Canva AI, Copilot)
-  const specificSelectors = [
+  // 1. Primary selectors (ChatGPT, Claude, Gemini, Grok, Perplexity, DeepSeek, Poe, Canva AI)
+  const primarySelectors = [
     '#prompt-textarea',
+    'textarea[data-id]',
+    'div.ProseMirror[contenteditable="true"]',
+    'div[data-placeholder*="Claude"]',
     'textarea[placeholder*="ChatGPT"]',
     'textarea[placeholder*="Claude"]',
-    'div[data-placeholder*="Claude"]',
-    'div.ProseMirror[contenteditable="true"]',
+    'textarea[data-testid*="grok"]',
     'textarea[placeholder*="Ask"]',
     'textarea[placeholder*="Message"]',
-    'textarea[placeholder*="Describe"]',
-    'textarea[placeholder*="Grok"]',
-    'textarea[placeholder*="Perplexity"]',
-    'textarea[placeholder*="DeepSeek"]',
-    'textarea[data-testid*="grok"]',
-    'div[contenteditable="true"]#prompt-textarea',
-    'div[contenteditable="true"][data-placeholder*="prompt"]',
-    'div[contenteditable="true"][data-placeholder*="Message"]',
-    'div[contenteditable="true"][aria-label*="Canva"]',
-    'div[contenteditable="true"][aria-label*="Assistant"]',
-    'div[contenteditable="true"][aria-label*="Chat"]'
+    'textarea[placeholder*="Describe"]'
   ];
-  
-  const specific = document.querySelector(specificSelectors.join(', '));
-  if (specific) return specific;
 
-  // 2. Universal Heuristic Query: Any textarea or contenteditable div with AI/Chat keywords
+  for (const sel of primarySelectors) {
+    const el = document.querySelector(sel);
+    if (el) return el;
+  }
+
+  // 2. Active element if it's editable
+  if (document.activeElement && isEditableElement(document.activeElement)) {
+    return document.activeElement.closest ? document.activeElement.closest('[contenteditable="true"], textarea') || document.activeElement : document.activeElement;
+  }
+
+  // 3. Fallback: Any textarea or contenteditable inside a form or chat container
+  const formInput = document.querySelector('form textarea, form [contenteditable="true"]');
+  if (formInput) return formInput;
+
+  // 4. Universal heuristic fallback
   const candidates = document.querySelectorAll('textarea, div[contenteditable="true"], input[type="text"]');
   for (const el of candidates) {
     const ph = (el.getAttribute("placeholder") || el.getAttribute("data-placeholder") || el.getAttribute("aria-label") || "").toLowerCase();
     const idClass = (el.id + " " + el.className).toLowerCase();
     
-    const isAiKeyword = /prompt|message|ask|chat|ai|assistant|copilot|claude|gemini|grok|gpt|deepseek|reply|describe|generate/.test(ph) ||
-                        /prompt|chat-input|chat-textarea|ai-input|composer|message-input|user-input/.test(idClass);
-                        
-    if (isAiKeyword) {
+    if (/prompt|message|ask|chat|ai|assistant|copilot|claude|gemini|grok|gpt|deepseek|reply|describe|generate/.test(ph) ||
+        /prompt|chat-input|chat-textarea|ai-input|composer|message-input|user-input/.test(idClass)) {
       return el;
     }
   }
 
-  return null;
+  return candidates.length > 0 ? candidates[0] : null;
 }
 
-function getSubmitButton() {
-  const specificSelectors = [
-    'button[data-testid*="send"]',
-    'button[data-testid*="grok"]',
-    'button[aria-label*="Send"]',
-    'button[aria-label*="send"]',
-    'button[aria-label*="Submit"]',
-    'button[aria-label*="Generate"]',
-    'button[aria-label*="Ask"]',
-    'button[class*="send"]',
-    'button[id*="send"]',
-    'button[class*="Submit"]',
-    'button[id*="submit"]'
-  ];
-  
-  const btn = document.querySelector(specificSelectors.join(', '));
-  if (btn) return btn;
+// Helper: Determine if an element is a Send / Submit button
+function isSendButton(el) {
+  if (!el) return false;
 
-  const buttons = document.querySelectorAll('button');
-  for (const b of buttons) {
-    const label = (b.getAttribute("aria-label") || b.innerText || b.className || "").toLowerCase();
-    if (/send|submit|generate|ask/.test(label)) {
-      return b;
-    }
+  let btn = (el.tagName === "BUTTON" || el.getAttribute("role") === "button") ? el : (el.closest ? el.closest('button, [role="button"]') : null);
+  if (!btn) return false;
+
+  const testId = (btn.getAttribute("data-testid") || "").toLowerCase();
+  const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
+  const idClass = (btn.id + " " + btn.className).toLowerCase();
+  const text = (btn.innerText || "").toLowerCase();
+
+  if (testId.includes("send") || testId.includes("submit") || testId.includes("grok") || testId.includes("composer")) return true;
+  if (aria.includes("send") || aria.includes("submit") || aria.includes("generate") || aria.includes("ask") || aria.includes("prompt")) return true;
+  if (idClass.includes("send") || idClass.includes("submit") || idClass.includes("composer")) return true;
+  if (/^send$|^submit$|^generate$/.test(text.trim())) return true;
+
+  // Check SVG or path inside form
+  if ((btn.querySelector && (btn.querySelector('svg') || btn.querySelector('path'))) && btn.closest('form, [class*="composer"], [class*="chat"]')) {
+    return true;
   }
 
-  return null;
+  return false;
 }
 
 // Helper: Check if an element is editable
@@ -104,26 +101,33 @@ function isEditableElement(el) {
   return false;
 }
 
-// Helper: Extract prompt text reliably
+// Helper: Extract prompt text reliably from the input element
 function getPromptText(inputElement, targetElement) {
   let text = "";
-  if (targetElement) {
-    const container = targetElement.closest ? targetElement.closest('[contenteditable="true"], textarea') : null;
-    const activeEl = container || targetElement;
-    text = activeEl.value || activeEl.innerText || activeEl.textContent || "";
-  }
-  if (!text.trim() && inputElement) {
+
+  // Always prioritize reading from inputElement first
+  if (inputElement) {
     text = inputElement.value || inputElement.innerText || inputElement.textContent || "";
   }
+
+  // Fallback to targetElement if targetElement is editable
+  if (!text.trim() && targetElement && isEditableElement(targetElement)) {
+    const container = targetElement.closest ? targetElement.closest('[contenteditable="true"], textarea') : targetElement;
+    text = container.value || container.innerText || container.textContent || "";
+  }
+
   return text ? text.trim() : "";
 }
 
 // Global re-entrancy lock to prevent submit loops & freezes
 let isBypassing = false;
 
-// Attach listeners to DOM
+// Attach listeners to DOM (useCapture = true to intercept before framework state updates)
 document.addEventListener("keydown", handleKeydown, true);
-document.addEventListener("click", handleClick, true);
+document.addEventListener("pointerdown", handlePointerOrClick, true);
+document.addEventListener("mousedown", handlePointerOrClick, true);
+document.addEventListener("click", handlePointerOrClick, true);
+document.addEventListener("submit", handleFormSubmit, true);
 
 function handleKeydown(event) {
   if (isBypassing) return;
@@ -139,30 +143,42 @@ function handleKeydown(event) {
   if (text && text.length > 0) {
     event.preventDefault();
     event.stopPropagation();
+    event.stopImmediatePropagation();
     initiateSecurityAudit(text, inputEl);
   }
 }
 
-function handleClick(event) {
+function handlePointerOrClick(event) {
   if (isBypassing) return;
   if (!isAIChatbotActive()) return;
 
   const target = event.target;
-  const btn = target.closest ? target.closest('button, [role="button"]') : null;
-  if (!btn) return;
-
-  const btnLabel = (btn.getAttribute("aria-label") || btn.innerText || btn.className || btn.id || "").toLowerCase();
-  const isSendBtn = /send|submit|generate|ask|grok/.test(btnLabel) || (btn.querySelector && btn.querySelector('svg'));
-
-  if (isSendBtn) {
+  if (isSendButton(target)) {
     const inputEl = getChatInput() || document.querySelector('textarea, [contenteditable="true"]');
     if (inputEl) {
-      const text = getPromptText(inputEl, target);
+      const text = getPromptText(inputEl, null);
       if (text && text.length > 0) {
         event.preventDefault();
         event.stopPropagation();
+        event.stopImmediatePropagation();
         initiateSecurityAudit(text, inputEl);
       }
+    }
+  }
+}
+
+function handleFormSubmit(event) {
+  if (isBypassing) return;
+  if (!isAIChatbotActive()) return;
+
+  const inputEl = getChatInput() || document.querySelector('textarea, [contenteditable="true"]');
+  if (inputEl) {
+    const text = getPromptText(inputEl, null);
+    if (text && text.length > 0) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      initiateSecurityAudit(text, inputEl);
     }
   }
 }
@@ -197,10 +213,37 @@ function localFallbackSanitize(text, entities) {
 // Send input to background worker to scan
 function initiateSecurityAudit(text, inputElement) {
   if (isBypassing) return;
-  
-  if (!chrome.runtime || !chrome.runtime.id) {
-    console.warn("[SecurePrompt] Extension context invalidated. Bypassing check.");
-    bypassAndSubmit(text, inputElement);
+
+  // Local fallback checker if background extension connection is offline or invalidated
+  const runLocalFallbackAudit = () => {
+    const fallbackClean = localFallbackSanitize(text, []);
+    const hasTokens = fallbackClean !== text || 
+                      /\b(?:sk-|AQ\.|AIzaSy|AKIA|ghp_|hf_)[a-zA-Z0-9._\-]{10,}\b/.test(text) ||
+                      /(?:api[_\s-]?key|secret|token|password)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?/i.test(text);
+
+    if (hasTokens) {
+      console.warn("[SecurePrompt] Background connection offline. Running local scanner fallback.");
+      const fallbackAnalysis = {
+        riskScore: 85,
+        riskLevel: "HIGH RISK",
+        reason: "CRITICAL SECURITY RISK: Prompt contains exposed API keys or secret credentials.",
+        entities: [{ item: text.length > 30 ? text.substring(0, 30) + "..." : text, type: "CREDENTIALS", severity: "High" }]
+      };
+      showSecurityPopup(text, fallbackAnalysis, inputElement);
+    } else {
+      bypassAndSubmit(text, inputElement);
+    }
+  };
+
+  try {
+    if (!chrome || !chrome.runtime || !chrome.runtime.id) {
+      console.warn("[SecurePrompt] Extension context invalidated. Running local scanner fallback.");
+      runLocalFallbackAudit();
+      return;
+    }
+  } catch (e) {
+    console.warn("[SecurePrompt] Extension context error. Running local scanner fallback:", e);
+    runLocalFallbackAudit();
     return;
   }
 
@@ -211,8 +254,8 @@ function initiateSecurityAudit(text, inputElement) {
   const timeoutId = setTimeout(() => {
     if (!isHandled) {
       isHandled = true;
-      console.warn("[SecurePrompt] Analysis timed out. Releasing input.");
-      bypassAndSubmit(text, inputElement);
+      console.warn("[SecurePrompt] Analysis timed out. Running local fallback.");
+      runLocalFallbackAudit();
     }
   }, 4000);
 
@@ -224,7 +267,7 @@ function initiateSecurityAudit(text, inputElement) {
 
       if (chrome.runtime.lastError) {
         console.warn("[SecurePrompt] Runtime error:", chrome.runtime.lastError.message);
-        bypassAndSubmit(text, inputElement);
+        runLocalFallbackAudit();
         return;
       }
 
@@ -236,16 +279,15 @@ function initiateSecurityAudit(text, inputElement) {
           bypassAndSubmit(text, inputElement);
         }
       } else {
-        console.warn("[SecurePrompt] API analysis failed. Bypassing check.");
-        bypassAndSubmit(text, inputElement);
+        console.warn("[SecurePrompt] API analysis failed. Running local fallback.");
+        runLocalFallbackAudit();
       }
     });
   } catch (e) {
     if (!isHandled) {
       isHandled = true;
       clearTimeout(timeoutId);
-      console.warn("[SecurePrompt] Messaging error:", e);
-      bypassAndSubmit(text, inputElement);
+      runLocalFallbackAudit();
     }
   }
 }
@@ -261,68 +303,77 @@ function showSecurityPopup(originalText, analysis, inputElement) {
   overlay.style.cssText = `
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(4, 6, 11, 0.85);
-    backdrop-filter: blur(4px);
+    background: rgba(11, 15, 23, 0.75);
+    backdrop-filter: blur(8px);
     z-index: 999999;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Outfit', sans-serif;
-    color: #F3F4F6;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #F8FAFC;
   `;
 
   const container = document.createElement("div");
   container.style.cssText = `
-    background: #0E1624;
-    border: 1px solid #1F2E47;
-    border-radius: 12px;
-    padding: 24px;
+    background: #0F172A;
+    border: 1px solid #1E293B;
+    border-radius: 14px;
+    padding: 22px;
     max-width: 480px;
     width: 90%;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.6);
   `;
+
+  const isHighRisk = analysis.riskScore >= 75;
+  const badgeBorder = isHighRisk ? "#F87171" : "#FBBF24";
+  const badgeBg = isHighRisk ? "rgba(239, 68, 68, 0.08)" : "rgba(245, 158, 11, 0.08)";
+  const badgeBorderBox = isHighRisk ? "rgba(239, 68, 68, 0.2)" : "rgba(245, 158, 11, 0.2)";
+  const badgeText = isHighRisk ? "#F87171" : "#FBBF24";
 
   // Construct UI
   container.innerHTML = `
-    <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #1F2E47; padding-bottom: 12px; margin-bottom: 16px;">
-      <span style="color: #EF4444; font-size: 20px;">⚠️</span>
-      <h3 style="margin: 0; font-size: 14px; font-weight: bold; text-transform: uppercase;">SecurePrompt Gateway Alert</h3>
+    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1E293B; padding-bottom: 12px; margin-bottom: 16px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${badgeText};"></span>
+        <h3 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: #F8FAFC;">SecurePrompt Gateway Guard</h3>
+      </div>
+      <span style="font-size: 10px; font-weight: 500; color: #64748B; background: #1E293B; padding: 2px 8px; border-radius: 12px;">v1.0</span>
     </div>
     
-    <div style="display: flex; gap: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 12px; border-radius: 8px; margin-bottom: 16px; align-items: center;">
-      <div style="width: 42px; height: 42px; border-radius: 50%; border: 2px solid #EF4444; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; color: #EF4444; shrink: 0;">
+    <div style="display: flex; gap: 14px; background: ${badgeBg}; border: 1px solid ${badgeBorderBox}; padding: 14px; border-radius: 10px; margin-bottom: 16px; align-items: flex-start;">
+      <div style="width: 40px; height: 40px; border-radius: 50%; border: 2px solid ${badgeBorder}; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; color: ${badgeText}; flex-shrink: 0; background: #0F172A;">
         ${analysis.riskScore}
       </div>
       <div>
-        <h4 style="margin: 0; font-size: 12px; font-weight: bold; color: #EF4444;">OVERALL RISK: ${analysis.riskLevel}</h4>
-        <p style="margin: 2px 0 0 0; font-size: 11px; color: #9CA3AF;">${analysis.reason}</p>
+        <h4 style="margin: 0; font-size: 12px; font-weight: 700; color: ${badgeText}; letter-spacing: 0.3px;">${analysis.riskLevel} DETECTED</h4>
+        <p style="margin: 3px 0 0 0; font-size: 11px; color: #94A3B8; line-height: 1.45;">${analysis.reason}</p>
       </div>
     </div>
 
     <div style="margin-bottom: 16px;">
-      <h4 style="margin: 0 0 6px 0; font-size: 11px; font-weight: bold; text-transform: uppercase; color: #9CA3AF;">Sensitive Items Identified:</h4>
-      <div style="display: flex; flex-direction: column; gap: 4px; max-height: 100px; overflow-y: auto;">
+      <h4 style="margin: 0 0 8px 0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #64748B;">Sensitive Entities Found (${analysis.entities.length}):</h4>
+      <div style="display: flex; flex-direction: column; gap: 6px; max-height: 110px; overflow-y: auto; padding-right: 2px;">
         ${analysis.entities.map(e => `
-          <div style="background: #080C14; border: 1px solid #1F2E47; padding: 6px 10px; border-radius: 6px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-family: monospace; font-weight: bold; color: #F3F4F6;">${e.item}</span>
-            <span style="font-size: 9px; font-weight: bold; color: #F59E0B;">${e.type}</span>
+          <div style="background: #0B0F17; border: 1px solid #1E293B; padding: 8px 12px; border-radius: 8px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #E2E8F0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${e.item}</span>
+            <span style="font-size: 9px; font-weight: 600; text-transform: uppercase; color: #38BDF8; background: rgba(14, 165, 233, 0.1); padding: 2px 6px; border-radius: 4px;">${e.type}</span>
           </div>
         `).join('')}
       </div>
     </div>
 
-    <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #1F2E47; padding-top: 12px;">
-      <button id="sp-btn-rewrite" style="width: 100%; padding: 10px; border-radius: 8px; background: #38BDF8; color: #080C14; border: none; font-weight: bold; font-size: 12px; cursor: pointer; text-align: left;">
+    <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #1E293B; padding-top: 14px;">
+      <button id="sp-btn-rewrite" style="width: 100%; padding: 11px 14px; border-radius: 8px; background: #0EA5E9; color: #FFFFFF; border: none; font-weight: 600; font-size: 12px; cursor: pointer; text-align: left; transition: opacity 0.15s ease;">
         Choice A: Generate Safe Prompt (Recommended)
-        <span style="display: block; font-size: 9px; opacity: 0.8; font-weight: normal; margin-top: 2px;">Sanitizes PII and identifiers using Llama 3.1</span>
+        <span style="display: block; font-size: 10px; opacity: 0.85; font-weight: 400; margin-top: 2px;">Sanitizes PII and credentials using local LLM rewriter</span>
       </button>
       
-      <button id="sp-btn-original" style="width: 100%; padding: 10px; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #EF4444; font-weight: bold; font-size: 12px; cursor: pointer; text-align: left;">
+      <button id="sp-btn-original" style="width: 100%; padding: 11px 14px; border-radius: 8px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: #F87171; font-weight: 600; font-size: 12px; cursor: pointer; text-align: left;">
         Choice B: Send Original Prompt
-        <span style="display: block; font-size: 9px; opacity: 0.8; font-weight: normal; margin-top: 2px;">Bypass blocker warnings</span>
+        <span style="display: block; font-size: 10px; opacity: 0.85; font-weight: 400; margin-top: 2px;">Bypass blocker warning and transmit raw prompt</span>
       </button>
       
-      <button id="sp-btn-cancel" style="width: 100%; padding: 8px; border-radius: 8px; background: transparent; border: 1px solid #6B7280; color: #9CA3AF; font-weight: bold; font-size: 11px; cursor: pointer;">
+      <button id="sp-btn-cancel" style="width: 100%; padding: 8px; border-radius: 8px; background: transparent; border: 1px solid #334155; color: #94A3B8; font-weight: 500; font-size: 11px; cursor: pointer;">
         Cancel & Edit
       </button>
     </div>
@@ -334,44 +385,53 @@ function showSecurityPopup(originalText, analysis, inputElement) {
   // Attach buttons listeners
   document.getElementById("sp-btn-rewrite").addEventListener("click", () => {
     const btn = document.getElementById("sp-btn-rewrite");
-    btn.innerText = "Rewriting with Llama 3.1...";
     btn.disabled = true;
     btn.style.opacity = "0.7";
 
-    let isHandled = false;
-    const timeoutId = setTimeout(() => {
-      if (!isHandled) {
-        isHandled = true;
-        overlay.remove();
-        const safeFallback = localFallbackSanitize(originalText, analysis.entities);
-        showRewriteReview(originalText, safeFallback, inputElement);
-      }
-    }, 6000);
+    chrome.storage.local.get(["rewriteModel"], (res) => {
+      const selectedModel = (res && res.rewriteModel) ? res.rewriteModel : "phi4-mini:latest";
+      btn.innerText = `Rewriting with ${selectedModel}...`;
 
-    try {
-      chrome.runtime.sendMessage({
-        action: "rewritePrompt",
-        prompt: originalText,
-        entities: analysis.entities
-      }, (rewriteResponse) => {
-        if (isHandled) return;
-        isHandled = true;
-        clearTimeout(timeoutId);
-        overlay.remove();
-
-        if (rewriteResponse && rewriteResponse.success && rewriteResponse.rewrite && rewriteResponse.rewrite.safePrompt) {
-          showRewriteReview(originalText, rewriteResponse.rewrite.safePrompt, inputElement);
-        } else {
+      let isHandled = false;
+      const timeoutId = setTimeout(() => {
+        if (!isHandled) {
+          isHandled = true;
+          overlay.remove();
           const safeFallback = localFallbackSanitize(originalText, analysis.entities);
           showRewriteReview(originalText, safeFallback, inputElement);
         }
-      });
-    } catch (e) {
-      if (!isHandled) {
-        isHandled = true;
-        clearTimeout(timeoutId);
-        overlay.remove();
-        const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+      }, 6500);
+
+      try {
+        chrome.runtime.sendMessage({
+          action: "rewritePrompt",
+          prompt: originalText,
+          entities: analysis.entities,
+          model: selectedModel
+        }, (rewriteResponse) => {
+          if (isHandled) return;
+          isHandled = true;
+          clearTimeout(timeoutId);
+          overlay.remove();
+
+          if (rewriteResponse && rewriteResponse.success && rewriteResponse.rewrite && rewriteResponse.rewrite.safePrompt) {
+            showRewriteReview(originalText, rewriteResponse.rewrite.safePrompt, inputElement);
+          } else {
+            const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+            showRewriteReview(originalText, safeFallback, inputElement);
+          }
+        });
+      } catch (e) {
+        if (!isHandled) {
+          isHandled = true;
+          clearTimeout(timeoutId);
+          overlay.remove();
+          const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+          showRewriteReview(originalText, safeFallback, inputElement);
+        }
+      }
+    });
+  });
         showRewriteReview(originalText, safeFallback, inputElement);
       }
     }
@@ -394,49 +454,50 @@ function showRewriteReview(originalText, safeText, inputElement) {
   overlay.style.cssText = `
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(4, 6, 11, 0.85);
-    backdrop-filter: blur(4px);
+    background: rgba(11, 15, 23, 0.75);
+    backdrop-filter: blur(8px);
     z-index: 999999;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Outfit', sans-serif;
-    color: #F3F4F6;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #F8FAFC;
   `;
 
   const container = document.createElement("div");
   container.style.cssText = `
-    background: #0E1624;
-    border: 1px solid #1F2E47;
-    border-radius: 12px;
-    padding: 24px;
-    max-width: 600px;
+    background: #0F172A;
+    border: 1px solid #1E293B;
+    border-radius: 14px;
+    padding: 22px;
+    max-width: 620px;
     width: 90%;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.6);
   `;
 
   container.innerHTML = `
-    <div style="border-bottom: 1px solid #1F2E47; padding-bottom: 12px; margin-bottom: 16px;">
-      <h3 style="margin: 0; font-size: 14px; font-weight: bold; color: #38BDF8;">Review Rewritten Prompt</h3>
+    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1E293B; padding-bottom: 12px; margin-bottom: 16px;">
+      <h3 style="margin: 0; font-size: 13px; font-weight: 600; color: #38BDF8; letter-spacing: 0.3px;">Review Rewritten Prompt</h3>
+      <span style="font-size: 10px; font-weight: 600; color: #10B981; background: rgba(16, 185, 129, 0.1); padding: 2px 8px; border-radius: 12px;">PII Cleansed</span>
     </div>
 
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
-      <div style="background: #080C14; border: 1px solid #1F2E47; padding: 10px; border-radius: 8px;">
-        <span style="font-size: 9px; font-weight: bold; color: #EF4444; display: block; margin-bottom: 4px;">ORIGINAL PROMPT:</span>
-        <div style="font-size: 11px; max-height: 120px; overflow-y: auto; font-family: monospace;">${originalText}</div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+      <div style="background: #0B0F17; border: 1px solid #1E293B; padding: 12px; border-radius: 10px;">
+        <span style="font-size: 10px; font-weight: 600; text-transform: uppercase; color: #F87171; display: block; margin-bottom: 6px; letter-spacing: 0.5px;">Original Prompt:</span>
+        <div style="font-size: 11px; max-height: 140px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; color: #94A3B8; line-height: 1.45;">${originalText}</div>
       </div>
-      <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); padding: 10px; border-radius: 8px;">
-        <span style="font-size: 9px; font-weight: bold; color: #38BDF8; display: block; margin-bottom: 4px;">PRIVACY-SAFE PROMPT:</span>
-        <div style="font-size: 11px; max-height: 120px; overflow-y: auto; font-family: monospace; color: #FFF;">${safeText}</div>
+      <div style="background: rgba(14, 165, 233, 0.04); border: 1px solid rgba(14, 165, 233, 0.2); padding: 12px; border-radius: 10px;">
+        <span style="font-size: 10px; font-weight: 600; text-transform: uppercase; color: #38BDF8; display: block; margin-bottom: 6px; letter-spacing: 0.5px;">Privacy-Safe Prompt:</span>
+        <div style="font-size: 11px; max-height: 140px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; color: #F8FAFC; line-height: 1.45;">${safeText}</div>
       </div>
     </div>
 
-    <div style="display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #1F2E47; padding-top: 12px;">
-      <button id="sp-review-back" style="padding: 8px 16px; border-radius: 6px; background: transparent; border: 1px solid #6B7280; color: #9CA3AF; font-weight: bold; font-size: 11px; cursor: pointer;">
+    <div style="display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #1E293B; padding-top: 14px;">
+      <button id="sp-review-back" style="padding: 8px 16px; border-radius: 8px; background: transparent; border: 1px solid #334155; color: #94A3B8; font-weight: 500; font-size: 11px; cursor: pointer;">
         Go Back
       </button>
-      <button id="sp-review-approve" style="padding: 8px 16px; border-radius: 6px; background: #38BDF8; color: #080C14; border: none; font-weight: bold; font-size: 11px; cursor: pointer;">
-        Approve & Send
+      <button id="sp-review-approve" style="padding: 8px 18px; border-radius: 8px; background: #0EA5E9; color: #FFFFFF; border: none; font-weight: 600; font-size: 11px; cursor: pointer;">
+        Approve & Send Safe Prompt
       </button>
     </div>
   `;
@@ -461,44 +522,44 @@ function showFinalWarning(originalText, analysis, inputElement) {
   overlay.style.cssText = `
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(4, 6, 11, 0.90);
-    backdrop-filter: blur(4px);
+    background: rgba(11, 15, 23, 0.85);
+    backdrop-filter: blur(8px);
     z-index: 999999;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Outfit', sans-serif;
-    color: #F3F4F6;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #F8FAFC;
   `;
 
   const container = document.createElement("div");
   container.style.cssText = `
-    background: #0E1624;
+    background: #0F172A;
     border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 12px;
-    padding: 24px;
-    max-width: 400px;
-    width: 95%;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    border-radius: 14px;
+    padding: 22px;
+    max-width: 420px;
+    width: 90%;
+    box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.6);
   `;
 
   container.innerHTML = `
-    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
-      <span style="color: #EF4444; font-size: 24px;">⚠️</span>
+    <div style="display: flex; gap: 12px; margin-bottom: 16px; align-items: flex-start;">
+      <span style="color: #F87171; font-size: 22px; line-height: 1;">⚠️</span>
       <div>
-        <h3 style="margin: 0; font-size: 14px; font-weight: bold; color: #FFF;">Final Warning (If Original Selected)</h3>
-        <p style="margin: 4px 0 0 0; font-size: 11px; color: #9CA3AF; line-height: 1.4;">
-          Sending sensitive values like API keys or financial records violates corporate compliance models.
+        <h3 style="margin: 0; font-size: 13px; font-weight: 600; color: #F8FAFC;">Confirm Original Transmission</h3>
+        <p style="margin: 4px 0 0 0; font-size: 11px; color: #94A3B8; line-height: 1.45;">
+          Transmitting unredacted API credentials or sensitive identifiers may violate corporate security policies.
         </p>
       </div>
     </div>
 
-    <div style="display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #1F2E47; padding-top: 12px;">
-      <button id="sp-warn-back" style="padding: 8px 16px; border-radius: 6px; background: transparent; border: 1px solid #6B7280; color: #9CA3AF; font-weight: bold; font-size: 11px; cursor: pointer;">
+    <div style="display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #1E293B; padding-top: 14px;">
+      <button id="sp-warn-back" style="padding: 8px 16px; border-radius: 8px; background: transparent; border: 1px solid #334155; color: #94A3B8; font-weight: 500; font-size: 11px; cursor: pointer;">
         Go Back
       </button>
-      <button id="sp-warn-confirm" style="padding: 8px 16px; border-radius: 6px; background: #EF4444; color: #FFF; border: none; font-weight: bold; font-size: 11px; cursor: pointer;">
-        Confirm & Send Original
+      <button id="sp-warn-confirm" style="padding: 8px 16px; border-radius: 8px; background: #DC2626; color: #FFFFFF; border: none; font-weight: 600; font-size: 11px; cursor: pointer;">
+        Transmit Original
       </button>
     </div>
   `;
@@ -542,7 +603,14 @@ function bypassAndSubmit(text, inputElement) {
   // Trigger submission on chatbot page with lock cleanup
   setTimeout(() => {
     try {
-      const submitBtn = getSubmitButton();
+      const buttons = document.querySelectorAll('button');
+      let submitBtn = null;
+      for (const b of buttons) {
+        if (isSendButton(b)) {
+          submitBtn = b;
+          break;
+        }
+      }
       if (submitBtn) {
         submitBtn.click();
       } else {

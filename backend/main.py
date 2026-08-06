@@ -250,6 +250,23 @@ def fallback_regex_scanner(text: str) -> List[Dict[str, Any]]:
     return entities
 
 
+@app.get("/models")
+async def get_local_models():
+    """Fetch list of locally installed Ollama models from http://localhost:11434/api/tags"""
+    try:
+        res = requests.get("http://localhost:11434/api/tags", timeout=2.5)
+        if res.status_code == 200:
+            data = res.json()
+            models = [m["name"] for m in data.get("models", [])]
+            if models:
+                logger.info(f"Discovered local Ollama models: {models}")
+                return {"models": models, "source": "Ollama Local Engine"}
+    except Exception as e:
+        logger.warning(f"Could not fetch Ollama models via HTTP: {e}")
+        
+    return {"models": ["phi4-mini:latest", "llama2-uncensored:7b", "llama3.1:latest"], "source": "Fallback Defaults"}
+
+
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_prompt(request: AnalyzeRequest):
     prompt_text = request.prompt
