@@ -432,10 +432,6 @@ function showSecurityPopup(originalText, analysis, inputElement) {
       }
     });
   });
-        showRewriteReview(originalText, safeFallback, inputElement);
-      }
-    }
-  });
 
   document.getElementById("sp-btn-original").addEventListener("click", () => {
     overlay.remove();
