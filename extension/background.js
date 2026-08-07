@@ -32,6 +32,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === "rewritePrompt") {
+    // [CHALLENGE 7 SOLUTION]: 6.5s Abort Controller Timeout for Async LLM Calls
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6500);
 

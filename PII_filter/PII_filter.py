@@ -105,12 +105,40 @@ if analyzer:
 def detect_all_tokens_and_keys(text: str) -> List[Dict[str, Any]]:
     tokens = []
     
-    prefix_pattern = r"(?i)\b(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?"
+    prefix_pattern = r"(?i)\b(?:api[_\s-]?key|secret|token|bearer|auth|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?"
     for m in re.finditer(prefix_pattern, text):
         matched_val = m.group(1)
         full_match = m.group(0)
         tokens.append({"item": matched_val, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
         tokens.append({"item": full_match, "type": "CREDENTIALS", "severity": "High", "confidence": 0.95})
+
+    # Passwords (allowing special chars like !@#$%^&*)
+    password_pattern = r"(?i)\b(?:password|passwd)\s*[:=]\s*(\S+)"
+    for m in re.finditer(password_pattern, text):
+        tokens.append({"item": m.group(1), "type": "PASSWORD", "severity": "High", "confidence": 0.95})
+        tokens.append({"item": m.group(0), "type": "PASSWORD", "severity": "High", "confidence": 0.95})
+
+    # Usernames
+    username_pattern = r"(?i)\b(?:username|user(?:[\s_-]?id)?|login)\s*[:=]\s*([a-zA-Z0-9._@-]{3,})"
+    for m in re.finditer(username_pattern, text):
+        tokens.append({"item": m.group(1), "type": "USERNAME", "severity": "Medium", "confidence": 0.95})
+        tokens.append({"item": m.group(0), "type": "USERNAME", "severity": "Medium", "confidence": 0.95})
+
+    # Security Questions
+    sec_q_pattern = r"(?i)\b(?:security\s*question)\s*[:=]\s*(.*?)(?=\n|$)"
+    for m in re.finditer(sec_q_pattern, text):
+        tokens.append({"item": m.group(0).strip(), "type": "SECURITY_QUESTION", "severity": "Medium", "confidence": 0.95})
+
+    # Security Answers
+    sec_a_pattern = r"(?i)\b(?:security\s*answer|answer)\s*[:=]\s*(.*?)(?=\n|$)"
+    for m in re.finditer(sec_a_pattern, text):
+        tokens.append({"item": m.group(0).strip(), "type": "SECURITY_ANSWER", "severity": "High", "confidence": 0.95})
+
+    # Recovery Codes / OTPs
+    otp_pattern = r"(?i)\b(?:recovery\s*code|otp|one\s*time\s*password|2fa\s*code|backup\s*code)\s*[:=]\s*([A-Za-z0-9-]+)"
+    for m in re.finditer(otp_pattern, text):
+        tokens.append({"item": m.group(1), "type": "OTP", "severity": "High", "confidence": 0.95})
+        tokens.append({"item": m.group(0), "type": "OTP", "severity": "High", "confidence": 0.95})
 
     cloud_patterns = [
         r"\bsk-[a-zA-Z0-9._\-]{10,}\b",
@@ -202,7 +230,7 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
         item_lower = f["item"].lower()
         ftype = f["type"].upper()
         
-        if ("ADDRESS" in ftype or "LOCATION" in ftype) and any(x in item_lower for x in ["example", "testville", "zz"]):
+        if ftype in ["ADDRESS", "LOCATION"] and any(x in item_lower for x in ["example", "testville", "zz"]):
             logger.info(f"Filtering out example address placeholder: {f['item']}")
             continue
             
@@ -215,55 +243,288 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
             seen.add(f["item"])
             deduped_findings.append(f)
 
+    # ── CONFIGURABLE POLICY ──────────────────────────────────────────────────
+    # Base severity (0-100) per entity type.
+    # High values here guarantee the "critical entity floor" requirement:
+    # a single Password (70) or API Key (90) can never score below its own weight.
+    ENTITY_WEIGHTS = {
+        "CREDENTIALS":          90,   # API Key / Secret
+        "JWT":                  90,   # Auth token
+        "SSN":                  20,   # SSN / National ID
+        "CREDIT_CARD":          70,
+        "CVV":                  80,
+        "US_BANK_NUMBER":       70,   # Bank Account
+        "PASSWORD":             90,   # Explicit password entity
+        "SECURITY_ANSWER":      60,
+        "SECURITY_QUESTION":    40,
+        "NRP":                  20,   # National Registration / ID numbers
+        "US_DRIVER_LICENSE":    50,
+        "IN_PAN":               20,   # India PAN card
+        "IN_AADHAAR":           20,   # India Aadhaar
+        "OTP":                  90,   # One-Time Passwords
+        "USERNAME":             20,
+        "PERSON":                5,   # Name
+        "EMAIL_ADDRESS":        20,
+        "PHONE_NUMBER":         15,
+        "DATE_TIME":            20,   # DOB equivalent
+        "ADDRESS":              20,
+        "IP_ADDRESS":           10,
+        "URL":                   5,
+        "INTERNAL_URL":         15,
+        "FINANCIAL_DATA":       25,
+        "CLIENT_PROJECT_DATA":  15,
+    }
+
+    # Combination rules: each entry is
+    #   { "entities": [set of types], "multiplier": float, "label": str, "description": str }
+    # The multiplier is applied to the highest individual entity weight in the combo.
+    COMBINATION_RULES = [
+        {
+            "entities": {"CREDENTIALS", "EMAIL_ADDRESS"},
+            "multiplier": 1.05,
+            "label": "API Key + Email",
+            "description": "Service credential with identifiable contact"
+        },
+        {
+            "entities": {"USERNAME", "PASSWORD"},
+            "multiplier": 1.15,
+            "label": "Username + Password",
+            "description": "Account credential exposure"
+        },
+        {
+            "entities": {"URL", "USERNAME", "CREDENTIALS"},
+            "multiplier": 1.25,
+            "label": "Website + Username + Password",
+            "description": "Identifiable account credential exposure"
+        },
+        {
+            "entities": {"INTERNAL_URL", "USERNAME", "CREDENTIALS"},
+            "multiplier": 1.25,
+            "label": "Internal URL + Username + Password",
+            "description": "Identifiable internal account credential exposure"
+        },
+        {
+            "entities": {"SECURITY_QUESTION", "SECURITY_ANSWER"},
+            "multiplier": 1.20,
+            "label": "Security Question + Answer",
+            "description": "Account recovery information exposure"
+        },
+        {
+            "entities": {"USERNAME", "CREDENTIALS", "SECURITY_QUESTION", "SECURITY_ANSWER"},
+            "multiplier": 1.40,
+            "label": "Auth + Recovery Bundle",
+            "description": "Full authentication and account recovery bundle"
+        },
+        {
+            "entities": {"USERNAME", "PASSWORD", "SECURITY_QUESTION", "SECURITY_ANSWER"},
+            "multiplier": 1.40,
+            "label": "Auth + Recovery Bundle",
+            "description": "Full authentication and account recovery bundle"
+        },
+        {
+            "entities": {"CREDIT_CARD", "CVV"},
+            "multiplier": 1.30,
+            "label": "Credit Card + CVV",
+            "description": "Payment credential bundle — card can be used for fraudulent transactions"
+        },
+        {
+            "entities": {"US_BANK_NUMBER", "ROUTING_NUMBER"},
+            "multiplier": 1.25,
+            "label": "Bank Account + Routing Number",
+            "description": "Banking credential bundle"
+        },
+        {
+            "entities": {"PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"},
+            "multiplier": 1.15,
+            "label": "Name + Email + Phone",
+            "description": "Identifiable personal contact bundle"
+        },
+        {
+            "entities": {"PERSON", "DATE_TIME", "ADDRESS"},
+            "multiplier": 1.20,
+            "label": "Name + DOB + Address",
+            "description": "Identity profile bundle"
+        },
+        {
+            "entities": {"SSN", "PERSON"},
+            "multiplier": 1.20,
+            "label": "Name + SSN",
+            "description": "Identity theft bundle"
+        },
+    ]
+
+    # Severity thresholds (configurable)
+    SEVERITY_THRESHOLDS = [
+        (80, "CRITICAL RISK"),
+        (60, "HIGH RISK"),
+        (40, "MODERATE RISK"),
+        (20, "LOW RISK"),
+        (0,  "MINIMAL RISK"),
+    ]
+
+    # ── EMPTY CASE ───────────────────────────────────────────────────────────
     if not deduped_findings:
-        risk_score = 5
-        risk_level = "LOW RISK"
+        risk_score = 0
+        risk_level = "MINIMAL RISK"
         reason = "SAFE: No sensitive keys, credentials, or PII detected. Prompt is safe to transmit."
-    else:
-        category_weights = {
-            "CREDENTIALS": 92,
-            "JWT": 90,
-            "US_BANK_NUMBER": 92,
-            "CREDIT_CARD": 94,
-            "SSN": 95,
-            "INTERNAL_URL": 82,
-            "EMAIL_ADDRESS": 78,
-            "FINANCIAL_DATA": 72,
-            "CLIENT_PROJECT_DATA": 60,
-            "PHONE_NUMBER": 55,
-            "PERSON": 50,
-            "DATE_TIME": 45,
-            "ADDRESS": 45,
+        return {
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "reason": reason,
+            "deduped_findings": deduped_findings
         }
 
-        base_weights = [category_weights.get(f["type"].upper(), 40) for f in deduped_findings]
-        max_base = max(base_weights)
-        
-        extra_items_count = len(deduped_findings) - 1
-        calculated_score = max_base + (extra_items_count * 4)
-        risk_score = min(99, calculated_score)
+    # ── STEP 1: Per-entity weights & dedup by TYPE (not item) ────────────────
+    # Duplicate occurrences of the same TYPE add a small log-scale increment
+    # so they're not completely ignored but also don't double-count linearly.
+    # ── STEP 1: Types for grouping ───────────────────────────────────────────
+    types_found = list(set(f["type"].upper() for f in deduped_findings))
 
-        types_found = list(set(f["type"].upper() for f in deduped_findings))
-        sample_items = [f"'{f['item'][:20]}...'" if len(f['item']) > 20 else f"'{f['item']}'" for f in deduped_findings[:3]]
-        items_str = ", ".join(sample_items)
+    # ── STEP 2: Highest individual entity risk (critical floor) ──────────────
+    individual_risks = {t: ENTITY_WEIGHTS.get(t, 5) for t in types_found}
+    highest_entity_risk = max(individual_risks.values()) if individual_risks else 0
 
-        if risk_score >= 75:
-            risk_level = "HIGH RISK"
-            if any(t in ["CREDENTIALS", "JWT", "CREDIT_CARD", "SSN", "US_BANK_NUMBER"] for t in types_found):
-                reason = f"CRITICAL SECURITY RISK: Prompt contains exposed secret keys/credentials ({items_str}) which can grant unauthorized system access or leak sensitive tokens."
-            elif "INTERNAL_URL" in types_found:
-                reason = f"HIGH INFRASTRUCTURE RISK: Prompt contains internal corporate URL subdomains ({items_str}) revealing private network routes."
-            else:
-                reason = f"HIGH PRIVACY RISK: Prompt contains highly sensitive personal identifiers ({items_str})."
-        elif risk_score >= 40:
-            risk_level = "MEDIUM RISK"
-            if "CLIENT_PROJECT_DATA" in types_found:
-                reason = f"CONFIDENTIAL DATA RISK: Prompt contains internal project codenames or client identifiers ({items_str})."
-            else:
-                reason = f"MEDIUM PRIVACY RISK: Prompt contains sensitive PII details ({items_str}) such as names, phone numbers, or dates."
+    # ── STEP 3: Noisy-OR base aggregation across all detected items ──────────
+    # We iterate over EVERY matched entity (not just types) so that multiple 
+    # occurrences of the same type properly compound the risk score.
+    prob_safe = 1.0
+    for f in deduped_findings:
+        w = ENTITY_WEIGHTS.get(f["type"].upper(), 5) / 100.0
+        prob_safe *= (1.0 - w)
+    noisy_or_risk = 100.0 * (1.0 - prob_safe)
+
+    # ── STEP 4: Combination detection + multiplier scoring ───────────────────
+    triggered_combos = []
+    best_combo_score = 0.0
+
+    for rule in COMBINATION_RULES:
+        required = rule["entities"]
+        if required.issubset(set(types_found)):
+            # Multiplier applied to highest individual weight among combo members
+            combo_max_weight = max(
+                ENTITY_WEIGHTS.get(e, 5) for e in required if e in individual_risks
+            )
+            combo_score = min(100.0, combo_max_weight * rule["multiplier"])
+            triggered_combos.append({
+                "label": rule["label"],
+                "description": rule["description"],
+                "score": round(combo_score, 1)
+            })
+            if combo_score > best_combo_score:
+                best_combo_score = combo_score
+
+    # ── STEP 5: Final score = max(floor, noisy_or, best_combo) ───────────────
+    # The floor ensures a single critical entity can never be diluted.
+    raw_score = max(highest_entity_risk, noisy_or_risk, best_combo_score)
+    risk_score = int(round(min(100.0, raw_score)))
+
+    # ── STEP 6: Severity level ────────────────────────────────────────────────
+    risk_level = "MINIMAL RISK"
+    for threshold, label in SEVERITY_THRESHOLDS:
+        if risk_score >= threshold:
+            risk_level = label
+            break
+
+    # ── STEP 7: Human-readable type labels ───────────────────────────────────
+    # [CHALLENGE 3 SOLUTION]: Granular Entity Classification & Dynamic Human-Readable Label Mapping
+    type_mapping = {
+        "CREDENTIALS":       "API Keys/Secrets",
+        "JWT":               "Auth Tokens",
+        "CREDIT_CARD":       "Credit Card Numbers",
+        "CVV":               "CVV Codes",
+        "SSN":               "Social Security Numbers",
+        "NRP":               "National ID Numbers",
+        "IN_PAN":            "PAN Card Numbers",
+        "IN_AADHAAR":        "Aadhaar Numbers",
+        "OTP":               "One-Time Passwords",
+        "US_BANK_NUMBER":    "Bank Account Numbers",
+        "INTERNAL_URL":      "Internal URLs",
+        "EMAIL_ADDRESS":     "Email Addresses",
+        "FINANCIAL_DATA":    "Financial Data",
+        "PHONE_NUMBER":      "Phone Numbers",
+        "PERSON":            "Names",
+        "DATE_TIME":         "Dates/DOB",
+        "ADDRESS":           "Addresses",
+        "IP_ADDRESS":        "IP Addresses",
+        "URL":               "URLs",
+        "US_DRIVER_LICENSE": "Driver Licenses",
+        "USERNAME":          "Usernames",
+        "PASSWORD":          "Passwords",
+        "SECURITY_QUESTION": "Security Questions",
+        "SECURITY_ANSWER":   "Security Answers",
+        "CLIENT_PROJECT_DATA": "Internal Project Data",
+    }
+    friendly_types = sorted(
+        [type_mapping.get(t, t.replace("_", " ").title()) for t in types_found]
+    )
+    friendly_types_str = ", ".join(friendly_types)
+
+    # ── STEP 8: Rich explanation ──────────────────────────────────────────────
+    risk_factors = []
+
+    # Always mention the highest individual entity
+    top_type = max(individual_risks, key=individual_risks.get)
+    top_label = type_mapping.get(top_type, top_type.replace("_", " ").title())
+    risk_factors.append(
+        f"Highest single entity: {top_label} (severity {int(round(individual_risks[top_type]))})"
+    )
+
+    if len(types_found) > 1:
+        risk_factors.append(f"{len(types_found)} distinct sensitive entity types detected")
+
+    combo_labels = [c["label"] for c in triggered_combos]
+    combo_descs  = [c["description"] for c in triggered_combos]
+
+    if triggered_combos:
+        for c in triggered_combos:
+            risk_factors.append(f"Dangerous combination: {c['label']} — {c['description']}")
+
+    # Build explanation sentence
+    if triggered_combos:
+        combo_summary = " and ".join(combo_descs)
+        if risk_score >= 80:
+            reason = (
+                f"CRITICAL SECURITY RISK: Prompt contains {combo_summary} "
+                f"({', '.join(combo_labels)}). "
+                f"Detected entities: {friendly_types_str}. "
+                f"Highest individual severity: {int(round(highest_entity_risk))}."
+            )
+        elif risk_score >= 60:
+            reason = (
+                f"HIGH RISK: Prompt contains {combo_summary} "
+                f"({', '.join(combo_labels)}). "
+                f"Detected entities: {friendly_types_str}."
+            )
         else:
-            risk_level = "LOW RISK"
-            reason = f"LOW RISK: Minor non-critical matches detected ({items_str})."
+            reason = (
+                f"MODERATE RISK: Prompt contains {combo_summary}. "
+                f"Detected entities: {friendly_types_str}."
+            )
+    else:
+        if risk_score >= 80:
+            reason = (
+                f"CRITICAL SECURITY RISK: Prompt exposes {top_label} "
+                f"(severity {int(round(highest_entity_risk))}). "
+                f"All detected: {friendly_types_str}."
+            )
+        elif risk_score >= 60:
+            reason = (
+                f"HIGH RISK: Prompt contains highly sensitive data — {friendly_types_str}. "
+                f"Highest severity entity: {top_label} ({int(round(highest_entity_risk))})."
+            )
+        elif risk_score >= 40:
+            reason = (
+                f"MODERATE PRIVACY RISK: Prompt contains identifying details — {friendly_types_str}."
+            )
+        elif risk_score >= 20:
+            reason = (
+                f"LOW RISK: Minor PII detected ({friendly_types_str}). "
+                f"Safe for general use but sanitize before publishing."
+            )
+        else:
+            reason = (
+                f"MINIMAL RISK: Negligible data detected ({friendly_types_str}). Safe to transmit."
+            )
 
     return {
         "risk_score": risk_score,
@@ -271,6 +532,7 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
         "reason": reason,
         "deduped_findings": deduped_findings
     }
+
 
 
 def perform_pii_rewrite(prompt_text: str, entities: List[Dict[str, Any]], model_name: str = "phi4-mini") -> Dict[str, str]:

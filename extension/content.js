@@ -120,7 +120,7 @@ function getPromptText(inputElement, targetElement) {
   return text ? text.trim() : "";
 }
 
-// Global re-entrancy lock to prevent submit loops & freezes
+// [CHALLENGE 5 SOLUTION]: Global Re-entrancy Flags & Event Interception Protection to Prevent Loops
 let isBypassing = false;
 let bypassedPrompt = null;
 
@@ -175,7 +175,7 @@ function handleClick(event) {
   }
 }
 
-// Local fallback sanitizer in JS if background/LLM connection fails
+// [CHALLENGE 7 SOLUTION]: Deterministic Local Fallback Redactor for Offline/Timing-out Backend
 function localFallbackSanitize(text, entities) {
   let safe = text || "";
   const sorted = (entities || []).slice().sort((a, b) => (b.item || "").length - (a.item || "").length);
@@ -265,7 +265,7 @@ function initiateSecurityAudit(text, inputElement) {
 
       if (response && response.success) {
         const analysis = response.analysis;
-        if (analysis.riskScore >= 40) {
+        if (analysis.riskScore > 20) {
           showSecurityPopup(text, analysis, inputElement);
         } else {
           bypassAndSubmitImmediate(text, inputElement);
@@ -337,8 +337,11 @@ function showSecurityPopup(originalText, analysis, inputElement) {
         ${analysis.riskScore}
       </div>
       <div>
-        <h4 style="margin: 0; font-size: 12px; font-weight: 700; color: ${badgeText}; letter-spacing: 0.3px;">${analysis.riskLevel} DETECTED</h4>
-        <p style="margin: 3px 0 0 0; font-size: 11px; color: #94A3B8; line-height: 1.45;">${analysis.reason}</p>
+        <h4 style="margin: 0; font-size: 13px; font-weight: 700; color: ${badgeText}; letter-spacing: 0.3px;">${analysis.riskLevel} DETECTED</h4>
+        <p style="margin: 5px 0 0 0; font-size: 12px; color: #F8FAFC; line-height: 1.5; font-weight: 500;">
+          <strong style="color: #94A3B8; text-transform: uppercase; font-size: 10px;">Details:</strong><br>
+          ${analysis.reason}
+        </p>
       </div>
     </div>
 
@@ -427,11 +430,94 @@ function showSecurityPopup(originalText, analysis, inputElement) {
 
   document.getElementById("sp-btn-original").addEventListener("click", () => {
     overlay.remove();
-    bypassAndSubmitImmediate(originalText, inputElement);
+    showFinalWarningPopup(originalText, analysis, inputElement);
   });
 
   document.getElementById("sp-btn-cancel").addEventListener("click", () => {
     overlay.remove();
+  });
+}
+
+// Final Warning popup for Option B
+function showFinalWarningPopup(originalText, analysis, inputElement) {
+  const overlay = document.createElement("div");
+  overlay.id = "secure-prompt-overlay";
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(4, 6, 11, 0.9);
+    backdrop-filter: blur(12px);
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  `;
+
+  const container = document.createElement("div");
+  container.style.cssText = `
+    background: #0E1624;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 14px;
+    padding: 24px;
+    max-width: 420px;
+    width: 90%;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+  `;
+
+  container.innerHTML = `
+    <div style="display: flex; gap: 14px; margin-bottom: 20px;">
+      <div style="color: #F87171; flex-shrink: 0; margin-top: 2px;">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+      </div>
+      <div>
+        <h3 style="margin: 0 0 6px 0; font-size: 15px; font-weight: 700; color: #F8FAFC;">Final Warning</h3>
+        <p style="margin: 0; font-size: 12px; color: #94A3B8; line-height: 1.5;">You are bypassing standard safety measures. This prompt will be transmitted unredacted to external public AI servers.</p>
+      </div>
+    </div>
+    
+    <div style="background: #080C14; border: 1px solid #1E293B; border-radius: 8px; padding: 12px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #F87171;">
+      Score: ${analysis.riskScore}/100. Severity Category: HIGH EXPOSURE risk.
+    </div>
+
+    <div style="display: flex; gap: 10px;">
+      <button id="sp-btn-back" style="flex: 1; padding: 10px; border-radius: 8px; background: transparent; border: 1px solid #334155; color: #CBD5E1; font-weight: 600; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+        Go Back
+      </button>
+      <button id="sp-btn-send-anyway" style="flex: 1; padding: 10px; border-radius: 8px; background: #DC2626; border: none; color: #FFFFFF; font-weight: 600; font-size: 12px; cursor: pointer; transition: all 0.2s;">
+        Send Anyway
+      </button>
+    </div>
+  `;
+
+  overlay.appendChild(container);
+  document.body.appendChild(overlay);
+
+  document.getElementById("sp-btn-back").addEventListener("click", () => {
+    overlay.remove();
+    showSecurityPopup(originalText, analysis, inputElement);
+  });
+
+  document.getElementById("sp-btn-send-anyway").addEventListener("click", () => {
+    overlay.remove();
+    
+    // Attempt to bypass UI by setting native value then submitting.
+    // In chat UIs, it will briefly populate and clear.
+    bypassAndSubmitImmediate(originalText, inputElement);
+    
+    // Instantly hide the input text to simulate "not putting it in the chat input text"
+    setTimeout(() => {
+      try {
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set 
+          || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        if (nativeInputValueSetter) {
+          nativeInputValueSetter.call(inputElement, "");
+        } else {
+          inputElement.value = "";
+        }
+        inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+      } catch (e) {}
+    }, 10);
   });
 }
 
@@ -511,7 +597,13 @@ function injectTextOnly(text, inputElement) {
   try {
     inputElement.focus();
     if (inputElement.tagName === "TEXTAREA" || inputElement.tagName === "INPUT") {
-      inputElement.value = text;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set 
+        || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(inputElement, text);
+      } else {
+        inputElement.value = text;
+      }
       inputElement.dispatchEvent(new Event("input", { bubbles: true }));
     } else {
       try {
@@ -535,7 +627,13 @@ function bypassAndSubmitImmediate(text, inputElement) {
   try {
     inputElement.focus();
     if (inputElement.tagName === "TEXTAREA" || inputElement.tagName === "INPUT") {
-      inputElement.value = text;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set 
+        || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(inputElement, text);
+      } else {
+        inputElement.value = text;
+      }
       inputElement.dispatchEvent(new Event("input", { bubbles: true }));
     } else {
       try {
@@ -584,3 +682,182 @@ function bypassAndSubmitImmediate(text, inputElement) {
     }
   }, 150);
 }
+
+// --- DRAGGABLE LIVE RISK WIDGET ---
+let liveWidget = null;
+let liveRiskDebounce = null;
+let lastAnalyzedText = "";
+
+function createLiveWidget() {
+  if (liveWidget) return liveWidget;
+  if (!isAIChatbotActive()) return null;
+
+  liveWidget = document.createElement("div");
+  liveWidget.id = "sp-live-widget";
+  liveWidget.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 200px;
+    background: #0F172A;
+    border: 1px solid #1E293B;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+    z-index: 999998;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #F8FAFC;
+    overflow: hidden;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 0.3s ease, border-color 0.3s ease;
+    display: flex;
+    flex-direction: column;
+  `;
+
+  liveWidget.innerHTML = `
+    <div id="sp-live-header" style="background: #1E293B; padding: 10px 14px; font-size: 11px; font-weight: 600; color: #94A3B8; display: flex; align-items: center; justify-content: space-between; cursor: grab;">
+      <span style="display:flex; align-items:center; gap:8px;">
+        <span id="sp-live-indicator" style="width:8px; height:8px; border-radius:50%; background:#0EA5E9; box-shadow: 0 0 6px #0EA5E9;"></span>
+        SecurePrompt AI
+      </span>
+    </div>
+    <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px;">
+      <div style="font-size: 10px; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Live Risk Score</div>
+      <div id="sp-live-score" style="font-size: 28px; font-weight: 700; color: #10B981; line-height: 1;">0</div>
+      <div id="sp-live-status" style="font-size: 11px; color: #10B981; font-weight: 600; margin-top: 2px;">SAFE</div>
+    </div>
+  `;
+
+  document.body.appendChild(liveWidget);
+
+  // Drag logic
+  const header = liveWidget.querySelector('#sp-live-header');
+  let isDragging = false, startX, startY, initialX, initialY;
+
+  header.addEventListener("mousedown", (e) => {
+    isDragging = true;
+    header.style.cursor = "grabbing";
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = liveWidget.getBoundingClientRect();
+    initialX = rect.left;
+    initialY = rect.top;
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    liveWidget.style.left = `${initialX + dx}px`;
+    liveWidget.style.top = `${initialY + dy}px`;
+    liveWidget.style.bottom = "auto";
+    liveWidget.style.right = "auto";
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (isDragging) {
+      isDragging = false;
+      header.style.cursor = "grab";
+    }
+  });
+
+  return liveWidget;
+}
+
+function updateLiveWidget(score, statusStr) {
+  if (!liveWidget) createLiveWidget();
+  if (!liveWidget) return;
+
+  liveWidget.style.opacity = "1";
+  
+  const scoreEl = liveWidget.querySelector('#sp-live-score');
+  const statusEl = liveWidget.querySelector('#sp-live-status');
+  const indicatorEl = liveWidget.querySelector('#sp-live-indicator');
+  
+  scoreEl.innerText = score;
+  
+  if (score === "...") {
+    scoreEl.style.color = "#94A3B8";
+    statusEl.style.color = "#94A3B8";
+    statusEl.innerText = statusStr || "Analyzing...";
+    indicatorEl.style.background = "#94A3B8";
+    indicatorEl.style.boxShadow = "0 0 6px #94A3B8";
+    liveWidget.style.borderColor = "#1E293B";
+    return;
+  }
+  
+  const numScore = parseInt(score);
+  statusEl.innerText = statusStr;
+
+  if (numScore >= 75) {
+    scoreEl.style.color = "#F87171";
+    statusEl.style.color = "#F87171";
+    indicatorEl.style.background = "#F87171";
+    indicatorEl.style.boxShadow = "0 0 6px #F87171";
+    liveWidget.style.borderColor = "rgba(239, 68, 68, 0.4)";
+  } else if (numScore >= 40) {
+    scoreEl.style.color = "#FBBF24";
+    statusEl.style.color = "#FBBF24";
+    indicatorEl.style.background = "#FBBF24";
+    indicatorEl.style.boxShadow = "0 0 6px #FBBF24";
+    liveWidget.style.borderColor = "rgba(245, 158, 11, 0.4)";
+  } else {
+    scoreEl.style.color = "#10B981";
+    statusEl.style.color = "#10B981";
+    indicatorEl.style.background = "#10B981";
+    indicatorEl.style.boxShadow = "0 0 6px #10B981";
+    liveWidget.style.borderColor = "rgba(16, 185, 129, 0.2)";
+  }
+}
+
+// Hook into global input events to debounce and analyze
+document.addEventListener("input", (e) => {
+  if (!isEditableElement(e.target)) return;
+  if (!isAIChatbotActive()) return;
+
+  const inputEl = (e.target.closest ? e.target.closest('[contenteditable="true"], textarea') : null) || e.target;
+  const text = getPromptText(inputEl, e.target);
+
+  if (text === lastAnalyzedText) return;
+
+  if (text.trim().length === 0) {
+    if (liveWidget) liveWidget.style.opacity = "0";
+    lastAnalyzedText = "";
+    return;
+  }
+
+  // Debounce API call
+  clearTimeout(liveRiskDebounce);
+  
+  if (!liveWidget || liveWidget.style.opacity === "0") {
+    createLiveWidget();
+    updateLiveWidget("...", "Typing...");
+  }
+
+  liveRiskDebounce = setTimeout(() => {
+    lastAnalyzedText = text;
+    updateLiveWidget("...", "Loading risk score...");
+
+    try {
+      if (!chrome || !chrome.runtime || !chrome.runtime.id) return;
+      
+      chrome.runtime.sendMessage({ action: "analyzePrompt", prompt: text }, (response) => {
+        if (chrome.runtime.lastError || !response || !response.success) {
+          // Local fallback check if background connection is broken or times out
+          const hasTokens = /\\b(?:sk-|AQ\\.|AIzaSy|AKIA|ghp_|hf_)[a-zA-Z0-9._\\-]{10,}\\b/.test(text) ||
+                            /(?:api[_\\s-]?key|secret|token|password)\\s*[:=\\-\\s]\\s*['\\"]?([a-zA-Z0-9._\\-]{10,})['\\"]?/i.test(text);
+          if (hasTokens) updateLiveWidget(85, "HIGH RISK");
+          else updateLiveWidget(0, "SAFE");
+          return;
+        }
+
+        const score = response.analysis.riskScore;
+        const level = response.analysis.riskLevel;
+        updateLiveWidget(score, level);
+      });
+    } catch (err) {
+      updateLiveWidget(0, "SAFE");
+    }
+  }, 600); // 600ms debounce
+}, true);

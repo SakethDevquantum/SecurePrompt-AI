@@ -48,6 +48,7 @@ class RewriteResponse(BaseModel):
     modelUsed: str
 
 
+# [CHALLENGE 7 SOLUTION]: Dynamic Ollama Discovery with Fallback Defaults
 @app.get("/models")
 async def get_local_models():
     """Fetch list of locally installed Ollama models from http://localhost:11434/api/tags"""

@@ -382,9 +382,14 @@ export default function App() {
             {/* Live Developer Audit Console (5 Columns) */}
             <div className="md:col-span-4 flex flex-col gap-4">
               <div className="card bg-[#0E1624] border-[#1F2E47] p-5 flex-1 flex flex-col h-[580px]">
-                <div className="flex items-center gap-2 mb-3 pb-2 border-b border-[#1F2E47]/70">
-                  <Terminal className="w-4 h-4 text-emerald-400" />
-                  <h3 className="font-bold text-white text-xs tracking-tight uppercase">Extension Network Logger</h3>
+                <div className="flex items-center justify-between mb-3 pb-2 border-b border-[#1F2E47]/70">
+                  <div className="flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-emerald-400" />
+                    <h3 className="font-bold text-white text-xs tracking-tight uppercase">Extension Network Logger</h3>
+                  </div>
+                  <span className="text-[10px] font-bold text-sky-400 bg-sky-950/30 px-2 py-1 rounded-md border border-sky-500/20">
+                    Logs Received: {logs.length}
+                  </span>
                 </div>
 
                 {/* Log messages */}
@@ -395,19 +400,21 @@ export default function App() {
                     </div>
                   ) : (
                     logs.map((log, index) => (
-                      <div key={index} className="p-2 bg-[#080C14] border border-[#1F2E47] rounded-lg space-y-1">
-                        <div className="flex justify-between items-center">
-                          <span className={`font-bold ${log.type === 'request' ? 'text-sky-400' : log.type === 'response' ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {log.type === 'request' ? '➡ [OUTBOUND_POST]' : log.type === 'response' ? '⬅ [INBOUND_JSON]' : '❌ [ERROR]'}
-                          </span>
-                          <span className="text-[9px] text-slate-500">{log.time}</span>
+                      <div key={index} className="p-3 bg-[#080C14] border border-[#1F2E47] rounded-lg flex flex-col gap-1.5">
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="font-bold text-slate-400 uppercase tracking-wide">Time</span>
+                          <span className="text-slate-300">{log.time}</span>
                         </div>
-                        <div className="text-slate-300 font-semibold">{log.message}</div>
-                        {log.data && (
-                          <pre className="mt-1 p-1.5 bg-[#03070E] rounded text-[9px] text-emerald-500 overflow-x-auto max-h-[120px]">
-                            {JSON.stringify(log.data, null, 2)}
-                          </pre>
-                        )}
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="font-bold text-slate-400 uppercase tracking-wide">Method</span>
+                          <span className={`font-bold ${log.type === 'request' ? 'text-sky-400' : log.type === 'response' ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {log.type === 'request' ? 'POST' : log.type === 'response' ? '200 OK' : 'ERROR'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="font-bold text-slate-400 uppercase tracking-wide">IP Address</span>
+                          <span className="text-emerald-400 font-mono">127.0.0.1</span>
+                        </div>
                       </div>
                     ))
                   )}
