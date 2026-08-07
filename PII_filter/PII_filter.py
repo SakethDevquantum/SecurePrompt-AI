@@ -19,6 +19,8 @@ except Exception as e:
     logger.warning(f"Could not load full Presidio Analyzer Engine (usually due to missing spacy model): {e}")
     analyzer = None
 
+# loads en_core_web_sm spacy model under the hood of AnalyzerEngine()
+
 # Custom Enterprise Recognizers & Rules
 api_key_pattern = Pattern(
     name="api_key",
@@ -281,23 +283,20 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
 def perform_pii_rewrite(prompt_text: str, entities: List[Dict[str, Any]], model_name: str = "phi4-mini") -> Dict[str, str]:
     """Executes Ollama LLM prompt rewrite with mandatory fallback pass."""
     system_prompt = (
-        "You are an AI Security Gateway agent. Your task is to rewrite the user's input prompt "
-        "to be completely safe for transmission to a public AI assistant (ChatGPT/Claude/Gemini/Copilot).\n\n"
+        "You are an AI Security Gateway agent. Your task is to sanitize the user's input prompt.\n"
         "Strict rules:\n"
-        "1. Preserve the user's core task, request, and programming logic.\n"
-        "2. Redact and generalize all private entities, credentials, names, URLs, phone numbers, dates of birth, addresses, and figures. "
-        "Use general category placeholders like [Email Address], [Phone Number], [Date of Birth], [Address], [API Key], [Name], [Account Number], [Salary], or generic terms like 'the client' or 'internal project'.\n"
-        "3. Never reproduce API keys, passwords, credentials, or actual phone numbers.\n"
-        "4. Do NOT change the requested task or code structure itself.\n"
-        "5. Output ONLY the safe rewritten prompt. Do NOT explain your changes. Do NOT add notes or introductory headers."
+        "1. You MUST preserve the EXACT same format, spacing, and line breaks as the original text.\n"
+        "2. Replace all private entities, credentials, names, URLs, phone numbers, and dates with placeholders like [Email Address], [Phone Number], [API Key], [Name], etc.\n"
+        "3. Do NOT add any extra line spacings, newlines at the end, headers, or explanations.\n"
+        "4. Output ONLY the exact text with placeholders substituted."
     )
     
     entities_summary = ", ".join([f"'{e.get('item','')}' (Type: {e.get('type','')})" for e in entities])
     
     user_prompt = (
-        f"Original Prompt: {prompt_text}\n\n"
-        f"Sensitive Entities to Redact/Generalize: {entities_summary}\n\n"
-        f"Safe Rewritten Prompt:"
+        f"Original Text:\n{prompt_text}\n\n"
+        f"Entities to Replace: {entities_summary}\n\n"
+        f"Output EXACTLY the Original Text, but with the Entities replaced by placeholders. No extra text, spaces, or newlines."
     )
 
     ollama_url = "http://localhost:11434/api/generate"
@@ -324,10 +323,23 @@ def perform_pii_rewrite(prompt_text: str, entities: List[Dict[str, Any]], model_
             if llm_output.startswith("```") and llm_output.endswith("```"):
                 lines = llm_output.split("\n")
                 if len(lines) > 2:
-                    llm_output = "\n".join(lines[1:-1])
+                    llm_output = "\n".join(lines[1:-1]).strip()
             if len(llm_output) > 5:
-                safe_prompt = llm_output
-                logger.info(f"Ollama rewrite received: {safe_prompt[:50]}...")
+                # Check if LLM added any extra line spacings or altered formatting
+                original_lines = len(prompt_text.split('\n'))
+                llm_lines = len(llm_output.split('\n'))
+                
+                if llm_lines != original_lines:
+                    logger.warning(f"Ollama LLM altered line spacing ({llm_lines} vs {original_lines}). Falling back to strict exact replacement.")
+                    safe_prompt = prompt_text
+                else:
+                    # Strictly preserve the original leading/trailing whitespaces
+                    if prompt_text.endswith('\n'):
+                        llm_output += '\n'
+                    if prompt_text.startswith('\n'):
+                        llm_output = '\n' + llm_output
+                    safe_prompt = llm_output
+                    logger.info(f"Ollama rewrite received: {safe_prompt[:50]}...")
         else:
             used_model = "Deterministic Sanitizer Engine"
             logger.warning(f"Ollama returned status {response.status_code}. Using deterministic sanitizer.")

@@ -122,6 +122,7 @@ function getPromptText(inputElement, targetElement) {
 
 // Global re-entrancy lock to prevent submit loops & freezes
 let isBypassing = false;
+let bypassedPrompt = null;
 
 // Attach listeners ONLY for Enter keypress and Send button click
 document.addEventListener("keydown", handleKeydown, true);
@@ -137,6 +138,11 @@ function handleKeydown(event) {
 
   const inputEl = (target.closest ? target.closest('[contenteditable="true"], textarea') : null) || getChatInput() || target;
   const text = getPromptText(inputEl, target);
+
+  if (text === bypassedPrompt) {
+    bypassedPrompt = null;
+    return;
+  }
 
   if (text && text.length > 0) {
     event.preventDefault();
@@ -155,6 +161,10 @@ function handleClick(event) {
     const inputEl = getChatInput() || document.querySelector('textarea, [contenteditable="true"]');
     if (inputEl) {
       const text = getPromptText(inputEl, null);
+      if (text === bypassedPrompt) {
+        bypassedPrompt = null;
+        return;
+      }
       if (text && text.length > 0) {
         event.preventDefault();
         event.stopPropagation();
@@ -213,7 +223,7 @@ function initiateSecurityAudit(text, inputElement) {
       };
       showSecurityPopup(text, fallbackAnalysis, inputElement);
     } else {
-      bypassAndSubmit(text, inputElement);
+      bypassAndSubmitImmediate(text, inputElement);
     }
   };
 
@@ -258,7 +268,7 @@ function initiateSecurityAudit(text, inputElement) {
         if (analysis.riskScore >= 40) {
           showSecurityPopup(text, analysis, inputElement);
         } else {
-          bypassAndSubmit(text, inputElement);
+          bypassAndSubmitImmediate(text, inputElement);
         }
       } else {
         console.warn("[SecurePrompt] API analysis failed. Running local fallback.");
@@ -380,7 +390,7 @@ function showSecurityPopup(originalText, analysis, inputElement) {
           isHandled = true;
           overlay.remove();
           const safeFallback = localFallbackSanitize(originalText, analysis.entities);
-          showRewriteReview(originalText, safeFallback, inputElement);
+          showRewriteReview(originalText, safeFallback, inputElement, analysis);
         }
       }, 6500);
 
@@ -397,10 +407,10 @@ function showSecurityPopup(originalText, analysis, inputElement) {
           overlay.remove();
 
           if (rewriteResponse && rewriteResponse.success && rewriteResponse.rewrite && rewriteResponse.rewrite.safePrompt) {
-            showRewriteReview(originalText, rewriteResponse.rewrite.safePrompt, inputElement);
+            showRewriteReview(originalText, rewriteResponse.rewrite.safePrompt, inputElement, analysis);
           } else {
             const safeFallback = localFallbackSanitize(originalText, analysis.entities);
-            showRewriteReview(originalText, safeFallback, inputElement);
+            showRewriteReview(originalText, safeFallback, inputElement, analysis);
           }
         });
       } catch (e) {
@@ -409,7 +419,7 @@ function showSecurityPopup(originalText, analysis, inputElement) {
           clearTimeout(timeoutId);
           overlay.remove();
           const safeFallback = localFallbackSanitize(originalText, analysis.entities);
-          showRewriteReview(originalText, safeFallback, inputElement);
+          showRewriteReview(originalText, safeFallback, inputElement, analysis);
         }
       }
     });
@@ -417,7 +427,7 @@ function showSecurityPopup(originalText, analysis, inputElement) {
 
   document.getElementById("sp-btn-original").addEventListener("click", () => {
     overlay.remove();
-    showFinalWarning(originalText, analysis, inputElement);
+    bypassAndSubmitImmediate(originalText, inputElement);
   });
 
   document.getElementById("sp-btn-cancel").addEventListener("click", () => {
@@ -426,7 +436,7 @@ function showSecurityPopup(originalText, analysis, inputElement) {
 }
 
 // Side-by-side prompt review overlay
-function showRewriteReview(originalText, safeText, inputElement) {
+function showRewriteReview(originalText, safeText, inputElement, analysis) {
   const overlay = document.createElement("div");
   overlay.id = "secure-prompt-overlay";
   overlay.style.cssText = `
@@ -475,7 +485,7 @@ function showRewriteReview(originalText, safeText, inputElement) {
         Go Back
       </button>
       <button id="sp-review-approve" style="padding: 8px 18px; border-radius: 8px; background: #0EA5E9; color: #FFFFFF; border: none; font-weight: 600; font-size: 11px; cursor: pointer;">
-        Approve & Send Safe Prompt
+        Approve & Use Safe Prompt
       </button>
     </div>
   `;
@@ -485,78 +495,41 @@ function showRewriteReview(originalText, safeText, inputElement) {
 
   document.getElementById("sp-review-back").addEventListener("click", () => {
     overlay.remove();
+    showSecurityPopup(originalText, analysis, inputElement);
   });
 
   document.getElementById("sp-review-approve").addEventListener("click", () => {
     overlay.remove();
-    bypassAndSubmit(safeText, inputElement);
+    injectTextOnly(safeText, inputElement);
   });
 }
 
-// Final warning confirm bypass
-function showFinalWarning(originalText, analysis, inputElement) {
-  const overlay = document.createElement("div");
-  overlay.id = "secure-prompt-overlay";
-  overlay.style.cssText = `
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(11, 15, 23, 0.85);
-    backdrop-filter: blur(8px);
-    z-index: 999999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: #F8FAFC;
-  `;
+// Input values injection
+function injectTextOnly(text, inputElement) {
+  bypassedPrompt = text; // Allow this exact text to bypass on next manual send
 
-  const container = document.createElement("div");
-  container.style.cssText = `
-    background: #0F172A;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 14px;
-    padding: 22px;
-    max-width: 420px;
-    width: 90%;
-    box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.6);
-  `;
-
-  container.innerHTML = `
-    <div style="display: flex; gap: 12px; margin-bottom: 16px; align-items: flex-start;">
-      <span style="color: #F87171; font-size: 22px; line-height: 1;">⚠️</span>
-      <div>
-        <h3 style="margin: 0; font-size: 13px; font-weight: 600; color: #F8FAFC;">Confirm Original Transmission</h3>
-        <p style="margin: 4px 0 0 0; font-size: 11px; color: #94A3B8; line-height: 1.45;">
-          Transmitting unredacted API credentials or sensitive identifiers may violate corporate security policies.
-        </p>
-      </div>
-    </div>
-
-    <div style="display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #1E293B; padding-top: 14px;">
-      <button id="sp-warn-back" style="padding: 8px 16px; border-radius: 8px; background: transparent; border: 1px solid #334155; color: #94A3B8; font-weight: 500; font-size: 11px; cursor: pointer;">
-        Go Back
-      </button>
-      <button id="sp-warn-confirm" style="padding: 8px 16px; border-radius: 8px; background: #DC2626; color: #FFFFFF; border: none; font-weight: 600; font-size: 11px; cursor: pointer;">
-        Transmit Original
-      </button>
-    </div>
-  `;
-
-  overlay.appendChild(container);
-  document.body.appendChild(overlay);
-
-  document.getElementById("sp-warn-back").addEventListener("click", () => {
-    overlay.remove();
-  });
-
-  document.getElementById("sp-warn-confirm").addEventListener("click", () => {
-    overlay.remove();
-    bypassAndSubmit(originalText, inputElement);
-  });
+  try {
+    inputElement.focus();
+    if (inputElement.tagName === "TEXTAREA" || inputElement.tagName === "INPUT") {
+      inputElement.value = text;
+      inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+    } else {
+      try {
+        document.execCommand("selectAll", false, null);
+        document.execCommand("insertText", false, text);
+      } catch (e) {
+        console.warn("[SecurePrompt] execCommand fallback:", e);
+        inputElement.innerText = text;
+        inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+  } catch (e) {
+    console.error("[SecurePrompt] Text insertion error:", e);
+  }
 }
 
-// Input values injection and simulate submission
-function bypassAndSubmit(text, inputElement) {
+// Immediately inject and trigger submission
+function bypassAndSubmitImmediate(text, inputElement) {
   isBypassing = true;
 
   try {
