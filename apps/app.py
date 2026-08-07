@@ -1,11 +1,12 @@
 import logging
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 
 from PII_filter.PII_filter import perform_pii_analysis, perform_pii_rewrite
+from file_scanner.file_scanner import extract_text_from_file
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SecurePromptApp")
@@ -88,6 +89,67 @@ async def analyze_prompt(request: AnalyzeRequest):
         reason=result["reason"],
         entities=mapped_entities
     )
+
+
+@app.post("/analyze-file", response_model=AnalyzeResponse)
+async def analyze_file(file: UploadFile = File(...)):
+    logger.info(f"Analyzing file: {file.filename}...")
+    file_bytes = await file.read()
+    
+    extraction_result = extract_text_from_file(file_bytes, file.filename)
+    
+    if not extraction_result["success"]:
+        # FAIL CLOSED on extraction failure
+        return AnalyzeResponse(
+            riskScore=100,
+            riskLevel="CRITICAL RISK",
+            reason=f"CRITICAL SECURITY RISK: File extraction failed ({extraction_result.get('error', 'Unknown')}). File blocked.",
+            entities=[EntityInfo(item=file.filename, type="BLOCKED_FILE", severity="High", confidence=1.0)]
+        )
+    
+    extracted_text = extraction_result["text"]
+    logger.info(f"Extracted {len(extracted_text)} chars from {file.filename} via {extraction_result.get('source', 'unknown')}")
+    
+    # Send extracted text to EXISTING untouched pipeline
+    result = perform_pii_analysis(extracted_text)
+    
+    mapped_entities = [
+        EntityInfo(
+            item=f["item"],
+            type=f["type"],
+            severity=f["severity"],
+            confidence=f["confidence"]
+        ) for f in result["deduped_findings"]
+    ]
+
+    return AnalyzeResponse(
+        riskScore=result["risk_score"],
+        riskLevel=result["risk_level"],
+        reason=result["reason"],
+        entities=mapped_entities
+    )
+
+from fastapi import Form
+import json
+class RewriteFileResponse(BaseModel):
+    success: bool
+    data: Optional[str] = None
+    mimeType: Optional[str] = None
+    error: Optional[str] = None
+
+from file_scanner.file_scanner import redact_file
+
+@app.post("/rewrite-file", response_model=RewriteFileResponse)
+async def rewrite_file_endpoint(file: UploadFile = File(...), entities: str = Form(...)):
+    logger.info(f"Rewriting file: {file.filename}...")
+    file_bytes = await file.read()
+    try:
+        entities_list = json.loads(entities)
+    except json.JSONDecodeError:
+        return RewriteFileResponse(success=False, error="Invalid entities JSON")
+        
+    result = redact_file(file_bytes, file.filename, entities_list)
+    return RewriteFileResponse(**result)
 
 
 @app.post("/rewrite", response_model=RewriteResponse)

@@ -189,6 +189,7 @@ function localFallbackSanitize(text, entities) {
     else if (etype.includes("ADDRESS") || etype.includes("LOCATION")) ph = "[Address]";
     else if (etype.includes("PERSON") || etype.includes("NAME")) ph = "[Name]";
     else if (etype.includes("CREDENTIAL") || etype.includes("KEY")) ph = "[API Key]";
+    else if (etype.includes("THREAT")) ph = "[THREAT BLOCKED]";
     safe = safe.split(ent.item).join(ph);
   }
   safe = safe.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[Email Address]");
@@ -199,6 +200,7 @@ function localFallbackSanitize(text, entities) {
   safe = safe.replace(/\bsk-[a-zA-Z0-9-]{12,}\b/g, "[API Key]");
   safe = safe.replace(/\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[Phone Number]");
   safe = safe.replace(/\b\d{4}[-/]\d{2}[-/]\d{2}\b/g, "[Date of Birth]");
+  safe = safe.replace(/\b(?:I will kill you|you will die for this|I'm going to kill you|I will end your life|You are going to die)\b/gi, "[THREAT BLOCKED]");
   return safe;
 }
 
@@ -285,17 +287,36 @@ function initiateSecurityAudit(text, inputElement) {
 }
 
 // Inject warning modal directly into chatbot DOM
-function showSecurityPopup(originalText, analysis, inputElement) {
-  // Remove existing overlays if any
-  const existing = document.getElementById("secure-prompt-overlay");
+let securityPopupActive = false;
+let currentResolve = null;
+
+function cleanupPopup() {
+  const existing = document.getElementById("sp-security-overlay");
   if (existing) existing.remove();
+  securityPopupActive = false;
+}
+
+function showSecurityPopup(originalText, analysis, inputElement, fileObj = null, fileData = null) {
+  console.log("[SecurePrompt] showSecurityPopup called. securityPopupActive is:", securityPopupActive);
+  if (securityPopupActive) {
+      console.warn("[SecurePrompt] Blocked showing popup because securityPopupActive is true.");
+      return;
+  }
+  securityPopupActive = true;
+
+  // Remove existing overlays if any
+  const existing = document.getElementById("sp-security-overlay");
+  if (existing) {
+      console.warn("[SecurePrompt] Found existing overlay! Removing it.");
+      existing.remove();
+  }
 
   const overlay = document.createElement("div");
-  overlay.id = "secure-prompt-overlay";
+  overlay.id = "sp-security-overlay";
   overlay.style.cssText = `
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(11, 15, 23, 0.75);
+    background: rgba(15, 23, 42, 0.85);
     backdrop-filter: blur(8px);
     z-index: 999999;
     display: flex;
@@ -321,6 +342,9 @@ function showSecurityPopup(originalText, analysis, inputElement) {
   const badgeBg = isHighRisk ? "rgba(239, 68, 68, 0.08)" : "rgba(245, 158, 11, 0.08)";
   const badgeBorderBox = isHighRisk ? "rgba(239, 68, 68, 0.2)" : "rgba(245, 158, 11, 0.2)";
   const badgeText = isHighRisk ? "#F87171" : "#FBBF24";
+  
+  const choiceAText = fileObj ? "Choice A: Mask & Download Safe File (Recommended)" : "Choice A: Generate Safe Prompt (Recommended)";
+  const choiceASubText = fileObj ? "Redacts sensitive data from the file and downloads a safe version" : "Sanitizes PII and credentials using local LLM rewriter";
 
   // Construct UI
   container.innerHTML = `
@@ -359,13 +383,13 @@ function showSecurityPopup(originalText, analysis, inputElement) {
 
     <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #1E293B; padding-top: 14px;">
       <button id="sp-btn-rewrite" style="width: 100%; padding: 11px 14px; border-radius: 8px; background: #0EA5E9; color: #FFFFFF; border: none; font-weight: 600; font-size: 12px; cursor: pointer; text-align: left; transition: opacity 0.15s ease;">
-        Choice A: Generate Safe Prompt (Recommended)
-        <span style="display: block; font-size: 10px; opacity: 0.85; font-weight: 400; margin-top: 2px;">Sanitizes PII and credentials using local LLM rewriter</span>
+        ${choiceAText}
+        <span style="display: block; font-size: 10px; opacity: 0.85; font-weight: 400; margin-top: 2px;">${choiceASubText}</span>
       </button>
       
       <button id="sp-btn-original" style="width: 100%; padding: 11px 14px; border-radius: 8px; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); color: #F87171; font-weight: 600; font-size: 12px; cursor: pointer; text-align: left;">
-        Choice B: Send Original Prompt
-        <span style="display: block; font-size: 10px; opacity: 0.85; font-weight: 400; margin-top: 2px;">Bypass blocker warning and transmit raw prompt</span>
+        Choice B: Send Original ${fileObj ? 'File' : 'Prompt'}
+        <span style="display: block; font-size: 10px; opacity: 0.85; font-weight: 400; margin-top: 2px;">Bypass blocker warning and transmit raw ${fileObj ? 'file' : 'prompt'}</span>
       </button>
       
       <button id="sp-btn-cancel" style="width: 100%; padding: 8px; border-radius: 8px; background: transparent; border: 1px solid #334155; color: #94A3B8; font-weight: 500; font-size: 11px; cursor: pointer;">
@@ -380,66 +404,99 @@ function showSecurityPopup(originalText, analysis, inputElement) {
   // Attach buttons listeners
   document.getElementById("sp-btn-rewrite").addEventListener("click", () => {
     const btn = document.getElementById("sp-btn-rewrite");
+    btn.innerHTML = `<span style="display: flex; align-items: center; gap: 8px;">Generating safe ${fileObj ? 'file' : 'prompt'}... <span style="display:inline-block; animation: pulse 1.5s infinite;">⏳</span></span>`;
     btn.disabled = true;
-    btn.style.opacity = "0.7";
 
-    chrome.storage.local.get(["rewriteModel"], (res) => {
-      const selectedModel = (res && res.rewriteModel) ? res.rewriteModel : "phi4-mini:latest";
-      btn.innerText = `Rewriting with ${selectedModel}...`;
-
-      let isHandled = false;
-      const timeoutId = setTimeout(() => {
-        if (!isHandled) {
-          isHandled = true;
-          overlay.remove();
-          const safeFallback = localFallbackSanitize(originalText, analysis.entities);
-          showRewriteReview(originalText, safeFallback, inputElement, analysis);
-        }
-      }, 6500);
-
-      try {
+    if (fileObj) {
         chrome.runtime.sendMessage({
-          action: "rewritePrompt",
-          prompt: originalText,
-          entities: analysis.entities,
-          model: selectedModel
+            action: "rewriteFile",
+            fileData: fileData,
+            fileName: fileObj.name,
+            mimeType: fileObj.type,
+            entities: analysis.entities
         }, (rewriteResponse) => {
-          if (isHandled) return;
-          isHandled = true;
-          clearTimeout(timeoutId);
-          overlay.remove();
+            if (rewriteResponse && rewriteResponse.success && rewriteResponse.rewrite && rewriteResponse.rewrite.success) {
+                cleanupPopup();
+                
+                // Trigger download of the safe file
+                const safeData = rewriteResponse.rewrite.data;
+                const safeMime = rewriteResponse.rewrite.mimeType;
+                const prefix = "data:" + safeMime + ";base64,";
+                
+                const downloadLink = document.createElement("a");
+                downloadLink.href = prefix + safeData;
+                downloadLink.download = "safe_" + fileObj.name;
+                downloadLink.click();
+                
+                // Toast notification instead of alert
+                const toast = document.createElement("div");
+                toast.innerHTML = `<strong>File Redacted!</strong><br/>SecurePrompt downloaded a safe version of your file.<br/>Please remove the original file and upload the safe one.`;
+                toast.style.cssText = "position:fixed;top:20px;right:20px;background:#3B82F6;color:#fff;padding:16px 20px;border-radius:10px;z-index:999999;font-family:sans-serif;font-size:14px;box-shadow:0 10px 25px rgba(0,0,0,0.4);border-left:4px solid #10B981;line-height:1.4;";
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 6000);
+            } else {
+                alert("Failed to redact file. It may not be a supported file type for redaction.");
+                cleanupPopup();
+            }
+        });
+    } else {
+        chrome.storage.local.get(["rewriteModel"], (res) => {
+          const selectedModel = (res && res.rewriteModel) ? res.rewriteModel : "phi4-mini:latest";
 
-          if (rewriteResponse && rewriteResponse.success && rewriteResponse.rewrite && rewriteResponse.rewrite.safePrompt) {
-            showRewriteReview(originalText, rewriteResponse.rewrite.safePrompt, inputElement, analysis);
-          } else {
-            const safeFallback = localFallbackSanitize(originalText, analysis.entities);
-            showRewriteReview(originalText, safeFallback, inputElement, analysis);
+          let isHandled = false;
+          const timeoutId = setTimeout(() => {
+            if (!isHandled) {
+              isHandled = true;
+              cleanupPopup();
+              const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+              showRewriteReview(originalText, safeFallback, inputElement, analysis);
+            }
+          }, 6500);
+
+          try {
+            chrome.runtime.sendMessage({
+              action: "rewritePrompt",
+              prompt: originalText,
+              entities: analysis.entities,
+              model: selectedModel
+            }, (rewriteResponse) => {
+              if (isHandled) return;
+              isHandled = true;
+              clearTimeout(timeoutId);
+              cleanupPopup();
+
+              if (rewriteResponse && rewriteResponse.success && rewriteResponse.rewrite && rewriteResponse.rewrite.safePrompt) {
+                showRewriteReview(originalText, rewriteResponse.rewrite.safePrompt, inputElement, analysis);
+              } else {
+                const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+                showRewriteReview(originalText, safeFallback, inputElement, analysis);
+              }
+            });
+          } catch (e) {
+            if (!isHandled) {
+              isHandled = true;
+              clearTimeout(timeoutId);
+              cleanupPopup();
+              const safeFallback = localFallbackSanitize(originalText, analysis.entities);
+              showRewriteReview(originalText, safeFallback, inputElement, analysis);
+            }
           }
         });
-      } catch (e) {
-        if (!isHandled) {
-          isHandled = true;
-          clearTimeout(timeoutId);
-          overlay.remove();
-          const safeFallback = localFallbackSanitize(originalText, analysis.entities);
-          showRewriteReview(originalText, safeFallback, inputElement, analysis);
-        }
-      }
-    });
+    }
   });
 
   document.getElementById("sp-btn-original").addEventListener("click", () => {
-    overlay.remove();
-    showFinalWarningPopup(originalText, analysis, inputElement);
+    cleanupPopup();
+    showFinalWarningPopup(originalText, analysis, inputElement, fileObj, fileData);
   });
 
   document.getElementById("sp-btn-cancel").addEventListener("click", () => {
-    overlay.remove();
+    cleanupPopup();
   });
 }
 
 // Final Warning popup for Option B
-function showFinalWarningPopup(originalText, analysis, inputElement) {
+function showFinalWarningPopup(originalText, analysis, inputElement, fileObj = null, fileData = null) {
   const overlay = document.createElement("div");
   overlay.id = "secure-prompt-overlay";
   overlay.style.cssText = `
@@ -495,7 +552,7 @@ function showFinalWarningPopup(originalText, analysis, inputElement) {
 
   document.getElementById("sp-btn-back").addEventListener("click", () => {
     overlay.remove();
-    showSecurityPopup(originalText, analysis, inputElement);
+    showSecurityPopup(originalText, analysis, inputElement, fileObj, fileData);
   });
 
   document.getElementById("sp-btn-send-anyway").addEventListener("click", () => {
@@ -503,19 +560,21 @@ function showFinalWarningPopup(originalText, analysis, inputElement) {
     
     // Attempt to bypass UI by setting native value then submitting.
     // In chat UIs, it will briefly populate and clear.
-    bypassAndSubmitImmediate(originalText, inputElement);
+    bypassAndSubmitImmediate(originalText, inputElement, fileObj);
     
     // Instantly hide the input text to simulate "not putting it in the chat input text"
     setTimeout(() => {
       try {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set 
-          || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-        if (nativeInputValueSetter) {
-          nativeInputValueSetter.call(inputElement, "");
-        } else {
-          inputElement.value = "";
+        if (inputElement) {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set 
+              || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            if (nativeInputValueSetter) {
+              nativeInputValueSetter.call(inputElement, "");
+            } else {
+              inputElement.value = "";
+            }
+            inputElement.dispatchEvent(new Event("input", { bubbles: true }));
         }
-        inputElement.dispatchEvent(new Event("input", { bubbles: true }));
       } catch (e) {}
     }, 10);
   });
@@ -620,9 +679,31 @@ function injectTextOnly(text, inputElement) {
   }
 }
 
-// Immediately inject and trigger submission
-function bypassAndSubmitImmediate(text, inputElement) {
+/// Immediately inject and trigger submission
+function bypassAndSubmitImmediate(text, inputElement, fileObj = null) {
   isBypassing = true;
+
+  if (!inputElement && fileObj) {
+    // The file was already attached naturally. Just click the send button to bypass.
+    try {
+        const buttons = document.querySelectorAll('button');
+        for (const b of buttons) {
+            if (isSendButton(b)) {
+                b.click();
+                break;
+            }
+        }
+    } catch (e) {
+        console.error("[SecurePrompt] Submission trigger error for file bypass:", e);
+    }
+    setTimeout(() => {
+        isBypassing = false;
+    }, 2500);
+    return;
+  } else if (!inputElement) {
+    console.error("[SecurePrompt] Cannot submit: inputElement is null and no file provided.");
+    return;
+  }
 
   try {
     inputElement.focus();
@@ -660,27 +741,27 @@ function bypassAndSubmitImmediate(text, inputElement) {
           break;
         }
       }
+      
       if (submitBtn) {
         submitBtn.click();
       } else {
-        const enterEvent = new KeyboardEvent("keydown", {
-          key: "Enter",
-          code: "Enter",
-          keyCode: 13,
-          which: 13,
-          bubbles: true,
-          cancelable: true
-        });
-        inputElement.dispatchEvent(enterEvent);
+        // Fallback: emit enter key on input element
+        if (inputElement) {
+            const enterEvent = new KeyboardEvent('keydown', {
+              key: 'Enter', code: 'Enter', keyCode: 13,
+              which: 13, bubbles: true, cancelable: true
+            });
+            inputElement.dispatchEvent(enterEvent);
+        }
       }
     } catch (e) {
-      console.error("[SecurePrompt] Submit trigger error:", e);
+      console.error("[SecurePrompt] Submission trigger error:", e);
     } finally {
       setTimeout(() => {
         isBypassing = false;
       }, 2500);
     }
-  }, 150);
+  }, 300);
 }
 
 // --- DRAGGABLE LIVE RISK WIDGET ---
@@ -861,3 +942,106 @@ document.addEventListener("input", (e) => {
     }
   }, 600); // 600ms debounce
 }, true);
+
+// --- FILE ATTACHMENT INTERCEPTION (Image, TXT, PDF) ---
+function handleFileAttachment(file, onUnsafe) {
+    if (!isAIChatbotActive()) return;
+    if (window.__sp_injecting_safe_file) {
+        console.log("[SecurePrompt] Skipping scan for injected safe file:", file.name);
+        return;
+    }
+
+    const supportedTypes = ['text/plain', 'application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/bmp', 'image/tiff', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    // Allow if it matches type or extension
+    const ext = (file.name.match(/\.[0-9a-z]+$/i) || [''])[0].toLowerCase();
+    const validExts = ['.txt', '.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif', '.docx'];
+    
+    if (!supportedTypes.includes(file.type) && !validExts.includes(ext)) {
+        return; // Skip unsupported files
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+        console.warn('[SecurePrompt] File too large for local scanning (Max 10MB)');
+        return;
+    }
+
+    if (!liveWidget || liveWidget.style.opacity === "0") {
+        createLiveWidget();
+    }
+    updateLiveWidget("...", "Scanning file...");
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const fileData = e.target.result;
+        
+        try {
+            chrome.runtime.sendMessage({
+                action: "analyzeFile",
+                fileData: fileData,
+                fileName: file.name,
+                mimeType: file.type
+            }, (response) => {
+                if (chrome.runtime.lastError || !response || !response.success) {
+                    console.error("[SecurePrompt] File scan failed:", chrome.runtime.lastError || response?.error);
+                    const errAnalysis = {
+                        riskScore: 100, riskLevel: "CRITICAL RISK",
+                        reason: "CRITICAL SECURITY RISK: File extraction failed or timed out. File blocked.",
+                        entities: [{ item: file.name, type: "BLOCKED_FILE", severity: "High", confidence: 1.0 }]
+                    };
+                    showSecurityPopup("[Attached File: " + file.name + "]", errAnalysis, null, file, fileData);
+                    if (onUnsafe) onUnsafe();
+                    return;
+                }
+                
+                const analysis = response.analysis;
+                updateLiveWidget(analysis.riskScore, analysis.riskLevel);
+                
+                if (analysis.riskScore > 20) {
+                    showSecurityPopup("[Attached File: " + file.name + "]", analysis, null, file, fileData);
+                    if (onUnsafe) onUnsafe();
+                }
+            });
+        } catch (err) {
+            console.error("[SecurePrompt] File scan error:", err);
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+// 1. File Input Change
+document.addEventListener('change', (e) => {
+    const target = e.target;
+    if (target.tagName === 'INPUT' && target.type === 'file' && target.files.length > 0) {
+        if (target.files[0].name.startsWith("safe_")) return;
+        
+        handleFileAttachment(target.files[0], null);
+    }
+}, true);
+
+// 2. Drag and Drop
+document.addEventListener('drop', (e) => {
+    if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+        if (e.dataTransfer.files[0].name.startsWith("safe_")) return;
+        
+        handleFileAttachment(e.dataTransfer.files[0], null);
+    }
+}, true);
+
+// 3. Paste
+document.addEventListener('paste', (e) => {
+    if (e.clipboardData && e.clipboardData.files.length > 0) {
+        if (e.clipboardData.files[0].name.startsWith("safe_")) return;
+        
+        handleFileAttachment(e.clipboardData.files[0], null);
+    }
+}, true);
+
+// 4. Intercept Off-DOM Inputs and File System API (Mid-conversation dynamically created inputs)
+window.addEventListener('message', (event) => {
+    if (event.source === window && event.data && event.data.type === 'SECURE_PROMPT_FILE_INJECTED') {
+        const file = event.data.file;
+        if (file && !file.name.startsWith("safe_")) {
+            handleFileAttachment(file, null);
+        }
+    }
+});

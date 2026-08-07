@@ -40,10 +40,18 @@ export default function App() {
   const [rewrittenPrompt, setRewrittenPrompt] = useState("");
   const [rewriteModelUsed, setRewriteModelUsed] = useState("");
 
+  // Activity Log
+  const addLog = () => {};
+
   // Fetch installed Ollama models on mount
   useEffect(() => {
     fetch(`${BACKEND_URL}/models`)
-      .then(res => res.json())
+      .then(res => {
+        if (res.ok) {
+          addLog("GET /models HTTP/1.1 200 OK", "response");
+        }
+        return res.json();
+      })
       .then(data => {
         if (data && data.models && data.models.length > 0) {
           setAvailableModels(data.models);
@@ -61,13 +69,7 @@ export default function App() {
     }
   ]);
 
-  // Activity Log
-  const [logs, setLogs] = useState([]);
 
-  const addLog = (message, type = "info", data = null) => {
-    const time = new Date().toLocaleTimeString();
-    setLogs(prev => [{ time, message, type, data }, ...prev]);
-  };
 
   // Sample templates for testing
   const sampleTemplates = [
@@ -101,6 +103,7 @@ export default function App() {
       });
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      addLog(`POST /analyze HTTP/1.1 200 OK`, "response");
       const data = await response.json();
       
       setScanResult(data);
@@ -185,6 +188,7 @@ export default function App() {
       });
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      addLog(`POST /rewrite HTTP/1.1 200 OK`, "response");
       const data = await response.json();
       
       setRewrittenPrompt(data.safePrompt);
@@ -269,24 +273,6 @@ export default function App() {
                 ))}
               </select>
             </div>
-
-            {/* Navigation Tabs */}
-            <div className="flex bg-[#080C14] p-1 rounded-xl border border-[#1F2E47]">
-              <button 
-                onClick={() => setActiveTab('chat')}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${activeTab === 'chat' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                <MessageSquare className="w-4 h-4" />
-                Chat Simulator
-              </button>
-              <button 
-                onClick={() => setActiveTab('deployment')}
-                className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${activeTab === 'deployment' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                <Server className="w-4 h-4" />
-                Deployment Architecture
-              </button>
-            </div>
           </div>
         </div>
       </header>
@@ -294,12 +280,8 @@ export default function App() {
       {/* Main Workspace */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col gap-6">
         
-        {/* Tab 1: Chat Sandbox & Audit Console */}
-        {activeTab === 'chat' && (
-          <div className="grid md:grid-cols-12 gap-6 items-stretch">
-            
-            {/* Chat Simulator Pane (7 Columns) */}
-            <div className="md:col-span-8 flex flex-col gap-4">
+        {/* Chat Simulator Pane */}
+        <div className="flex flex-col gap-4 w-full">
               <div className="card bg-[#0E1624] border-[#1F2E47] p-5 h-[580px] flex flex-col justify-between">
                 
                 {/* Simulated Chat Interface Header */}
@@ -378,91 +360,6 @@ export default function App() {
 
               </div>
             </div>
-
-            {/* Live Developer Audit Console (5 Columns) */}
-            <div className="md:col-span-4 flex flex-col gap-4">
-              <div className="card bg-[#0E1624] border-[#1F2E47] p-5 flex-1 flex flex-col h-[580px]">
-                <div className="flex items-center justify-between mb-3 pb-2 border-b border-[#1F2E47]/70">
-                  <div className="flex items-center gap-2">
-                    <Terminal className="w-4 h-4 text-emerald-400" />
-                    <h3 className="font-bold text-white text-xs tracking-tight uppercase">Extension Network Logger</h3>
-                  </div>
-                  <span className="text-[10px] font-bold text-sky-400 bg-sky-950/30 px-2 py-1 rounded-md border border-sky-500/20">
-                    Logs Received: {logs.length}
-                  </span>
-                </div>
-
-                {/* Log messages */}
-                <div className="flex-1 overflow-y-auto space-y-3 pr-1 font-mono text-[10px]">
-                  {logs.length === 0 ? (
-                    <div className="text-slate-600 text-center py-10 italic">
-                      No HTTP calls recorded. Trigger an analysis to view transmission logs.
-                    </div>
-                  ) : (
-                    logs.map((log, index) => (
-                      <div key={index} className="p-3 bg-[#080C14] border border-[#1F2E47] rounded-lg flex flex-col gap-1.5">
-                        <div className="flex justify-between items-center text-[10px]">
-                          <span className="font-bold text-slate-400 uppercase tracking-wide">Time</span>
-                          <span className="text-slate-300">{log.time}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-[10px]">
-                          <span className="font-bold text-slate-400 uppercase tracking-wide">Method</span>
-                          <span className={`font-bold ${log.type === 'request' ? 'text-sky-400' : log.type === 'response' ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {log.type === 'request' ? 'POST' : log.type === 'response' ? '200 OK' : 'ERROR'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center text-[10px]">
-                          <span className="font-bold text-slate-400 uppercase tracking-wide">IP Address</span>
-                          <span className="text-emerald-400 font-mono">127.0.0.1</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {/* Tab 2: Deployment Layout */}
-        {activeTab === 'deployment' && (
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="card bg-[#0E1624] border-[#1F2E47] p-5">
-              <h3 className="font-bold text-white text-sm mb-4 border-b border-[#1F2E47]/70 pb-3">FastAPI Deployment</h3>
-              <div className="space-y-4">
-                {deploymentData.backend.map((step) => (
-                  <div key={step.step} className="flex gap-4 items-start">
-                    <div className="w-6 h-6 rounded-lg bg-slate-800 border border-slate-700 text-xs flex items-center justify-center shrink-0 text-slate-300 font-semibold mt-0.5">
-                      {step.step}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-white">{step.name}</h4>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{step.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="card bg-[#0E1624] border-[#1F2E47] p-5">
-              <h3 className="font-bold text-white text-sm mb-4 border-b border-[#1F2E47]/70 pb-3">Local LLM Orchestration</h3>
-              <div className="space-y-4">
-                {deploymentData.llm.map((step, idx) => (
-                  <div key={idx} className="flex gap-4 items-start">
-                    <div className="w-6 h-6 rounded-lg bg-slate-800 border border-slate-700 text-xs flex items-center justify-center shrink-0 text-slate-300 font-semibold mt-0.5">
-                      {idx + 1}
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-white">{step.name}</h4>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{step.desc}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
 
       </main>
 

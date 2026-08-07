@@ -61,6 +61,30 @@ address_pattern = Pattern(
     score=0.85
 )
 
+cvv_pattern = Pattern(
+    name="cvv",
+    regex=r"(?i)\b(?:cvv|cvc|security\s*code|cid)\s*[:=-]?\s*(\d{3,4})\b",
+    score=0.95
+)
+
+aadhaar_pattern = Pattern(
+    name="aadhaar",
+    regex=r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",
+    score=0.95
+)
+
+pan_pattern = Pattern(
+    name="pan_number",
+    regex=r"\b[A-Z]{3}[PCHFATBLJG][A-Z]\d{4}[A-Z]\b",
+    score=0.95
+)
+
+death_threat_pattern = Pattern(
+    name="death_threat",
+    regex=r"(?i)\b(?:I will kill you|you will die for this|I'm going to kill you|I will end your life|You are going to die)\b",
+    score=0.99
+)
+
 
 if analyzer:
     api_key_recognizer = PatternRecognizer(
@@ -92,6 +116,30 @@ if analyzer:
         patterns=[address_pattern]
     )
     analyzer.registry.add_recognizer(address_recognizer)
+    
+    cvv_recognizer = PatternRecognizer(
+        supported_entity="CREDIT_CARD_CVV",
+        patterns=[cvv_pattern]
+    )
+    analyzer.registry.add_recognizer(cvv_recognizer)
+    
+    aadhaar_recognizer = PatternRecognizer(
+        supported_entity="AADHAAR_NUMBER",
+        patterns=[aadhaar_pattern]
+    )
+    analyzer.registry.add_recognizer(aadhaar_recognizer)
+    
+    pan_recognizer = PatternRecognizer(
+        supported_entity="PAN_NUMBER",
+        patterns=[pan_pattern]
+    )
+    analyzer.registry.add_recognizer(pan_recognizer)
+
+    threat_recognizer = PatternRecognizer(
+        supported_entity="THREAT",
+        patterns=[death_threat_pattern]
+    )
+    analyzer.registry.add_recognizer(threat_recognizer)
 
     enterprise_keywords = [
         "Apollo", "Project Apollo", "Saketh", "SecurePrompt", "SentinelPrompt"
@@ -180,6 +228,11 @@ def fallback_regex_scanner(text: str) -> List[Dict[str, Any]]:
     phone_regex = r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
     api_key_regex = r"\b(?:sk-[a-zA-Z0-9-]{12,}|AIzaSy[a-zA-Z0-9._\-]{33}|AKIA[0-9A-Z]{16})\b"
 
+    cvv_regex = r"(?i)\b(?:cvv|cvc|security\s*code|cid)\s*[:=-]?\s*(\d{3,4})\b"
+    aadhaar_regex = r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"
+    pan_regex = r"\b[A-Z]{3}[PCHFATBLJG][A-Z]\d{4}[A-Z]\b"
+    threat_regex = r"(?i)\b(?:I will kill you|you will die for this|I'm going to kill you|I will end your life|You are going to die)\b"
+
     for match in re.finditer(email_regex, text):
         entities.append({"item": match.group(), "type": "EMAIL_ADDRESS", "severity": "High", "confidence": 0.99})
 
@@ -188,25 +241,42 @@ def fallback_regex_scanner(text: str) -> List[Dict[str, Any]]:
 
     for match in re.finditer(api_key_regex, text):
         entities.append({"item": match.group(), "type": "CREDENTIALS", "severity": "High", "confidence": 0.99})
+        
+    for match in re.finditer(cvv_regex, text):
+        entities.append({"item": match.group(), "type": "CREDIT_CARD_CVV", "severity": "High", "confidence": 0.95})
+        
+    for match in re.finditer(aadhaar_regex, text):
+        entities.append({"item": match.group(), "type": "AADHAAR_NUMBER", "severity": "High", "confidence": 0.95})
+        
+    for match in re.finditer(pan_regex, text):
+        entities.append({"item": match.group(), "type": "PAN_NUMBER", "severity": "High", "confidence": 0.95})
+
+    for match in re.finditer(threat_regex, text):
+        entities.append({"item": match.group(), "type": "THREAT", "severity": "High", "confidence": 0.99})
 
     return entities
 
 
 def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
     """Scans prompt text for PII/Secrets and calculates calibrated risk score."""
+    # Pre-clean the text to remove already redacted tags and explicit "Redacted" mentions
+    # This prevents the scanner from hallucinating on safe files or prompts containing "Redacted xyz"
+    safe_text = re.sub(r'(?i)\[?REDACTED_[A-Z0-9_]+\]?', '', prompt_text)
+    safe_text = re.sub(r'(?i)redacted\s+[a-z]+', '', safe_text)
+    
     findings = []
     
-    findings.extend(detect_all_tokens_and_keys(prompt_text))
+    findings.extend(detect_all_tokens_and_keys(safe_text))
     
     if analyzer:
         try:
-            results = analyzer.analyze(text=prompt_text, language="en")
+            results = analyzer.analyze(text=safe_text, language="en")
             for res in results:
-                matched_item = prompt_text[res.start:res.end]
+                matched_item = safe_text[res.start:res.end]
                 entity_type = res.entity_type
                 severity = "Medium"
                 
-                if entity_type in ["EMAIL_ADDRESS", "US_BANK_NUMBER", "CREDENTIALS", "JWT", "INTERNAL_URL"]:
+                if entity_type in ["EMAIL_ADDRESS", "US_BANK_NUMBER", "CREDENTIALS", "JWT", "INTERNAL_URL", "CREDIT_CARD_CVV", "AADHAAR_NUMBER", "PAN_NUMBER", "THREAT"]:
                     severity = "High"
                 elif entity_type in ["PHONE_NUMBER", "PERSON", "DATE_TIME"]:
                     severity = "Medium"
@@ -221,19 +291,15 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
                 })
         except Exception as e:
             logger.error(f"Presidio analyze error: {e}. Using fallback scanner.")
-            findings.extend(fallback_regex_scanner(prompt_text))
+            findings.extend(fallback_regex_scanner(safe_text))
     else:
-        findings.extend(fallback_regex_scanner(prompt_text))
+        findings.extend(fallback_regex_scanner(safe_text))
         
     filtered_findings = []
     for f in findings:
         item_lower = f["item"].lower()
         ftype = f["type"].upper()
         
-        if ftype in ["ADDRESS", "LOCATION"] and any(x in item_lower for x in ["example", "testville", "zz"]):
-            logger.info(f"Filtering out example address placeholder: {f['item']}")
-            continue
-            
         filtered_findings.append(f)
 
     seen = set()
@@ -253,6 +319,10 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
         "SSN":                  20,   # SSN / National ID
         "CREDIT_CARD":          70,
         "CVV":                  80,
+        "CREDIT_CARD_CVV":      95,
+        "AADHAAR_NUMBER":       95,
+        "PAN_NUMBER":           95,
+        "THREAT":               100,  # Death threats / Violence
         "US_BANK_NUMBER":       70,   # Bank Account
         "PASSWORD":             90,   # Explicit password entity
         "SECURITY_ANSWER":      60,
@@ -267,7 +337,7 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
         "EMAIL_ADDRESS":        20,
         "PHONE_NUMBER":         15,
         "DATE_TIME":            20,   # DOB equivalent
-        "ADDRESS":              20,
+        "ADDRESS":              90,
         "IP_ADDRESS":           10,
         "URL":                   5,
         "INTERNAL_URL":         15,
