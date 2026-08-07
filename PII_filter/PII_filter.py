@@ -8,11 +8,9 @@ import requests
 from presidio_analyzer import AnalyzerEngine, PatternRecognizer, Pattern, RecognizerResult
 from presidio_analyzer.predefined_recognizers import EmailRecognizer, PhoneRecognizer
 
-# Configure Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SecurePromptPIIFilter")
 
-# Initialize Presidio Analyzer Engine
 try:
     analyzer = AnalyzerEngine()
 except Exception as e:
@@ -21,7 +19,6 @@ except Exception as e:
 
 # loads en_core_web_sm spacy model under the hood of AnalyzerEngine()
 
-# Custom Enterprise Recognizers & Rules
 api_key_pattern = Pattern(
     name="api_key",
     regex=r"(?i)\b(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?",
@@ -64,7 +61,7 @@ address_pattern = Pattern(
     score=0.85
 )
 
-# Register Custom Recognizers in Presidio Engine
+
 if analyzer:
     api_key_recognizer = PatternRecognizer(
         supported_entity="CREDENTIALS",
@@ -105,8 +102,6 @@ if analyzer:
     )
     analyzer.registry.add_recognizer(enterprise_recognizer)
 
-
-# Helper: Standalone & Multi-Delimiter Security Token Recognizer
 def detect_all_tokens_and_keys(text: str) -> List[Dict[str, Any]]:
     tokens = []
     
@@ -150,8 +145,6 @@ def detect_all_tokens_and_keys(text: str) -> List[Dict[str, Any]]:
 
     return tokens
 
-
-# Helper: Local Fallback Regex Scanner
 def fallback_regex_scanner(text: str) -> List[Dict[str, Any]]:
     entities = []
 
@@ -325,7 +318,6 @@ def perform_pii_rewrite(prompt_text: str, entities: List[Dict[str, Any]], model_
                 if len(lines) > 2:
                     llm_output = "\n".join(lines[1:-1]).strip()
             if len(llm_output) > 5:
-                # Check if LLM added any extra line spacings or altered formatting
                 original_lines = len(prompt_text.split('\n'))
                 llm_lines = len(llm_output.split('\n'))
                 
@@ -333,7 +325,6 @@ def perform_pii_rewrite(prompt_text: str, entities: List[Dict[str, Any]], model_
                     logger.warning(f"Ollama LLM altered line spacing ({llm_lines} vs {original_lines}). Falling back to strict exact replacement.")
                     safe_prompt = prompt_text
                 else:
-                    # Strictly preserve the original leading/trailing whitespaces
                     if prompt_text.endswith('\n'):
                         llm_output += '\n'
                     if prompt_text.startswith('\n'):

@@ -2,7 +2,6 @@ import sys
 import os
 import uvicorn
 
-# Ensure workspace root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from apps.app import app
