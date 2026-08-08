@@ -123,6 +123,7 @@ function getPromptText(inputElement, targetElement) {
 // [CHALLENGE 5 SOLUTION]: Global Re-entrancy Flags & Event Interception Protection to Prevent Loops
 let isBypassing = false;
 let bypassedPrompt = null;
+let pendingUnsafeFile = null;
 
 // Attach listeners ONLY for Enter keypress and Send button click
 document.addEventListener("keydown", handleKeydown, true);
@@ -142,6 +143,18 @@ function handleKeydown(event) {
   if (text === bypassedPrompt) {
     bypassedPrompt = null;
     return;
+  }
+
+  if (pendingUnsafeFile) {
+    if (document.body.textContent.includes(pendingUnsafeFile.file.name)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      showSecurityPopup(pendingUnsafeFile.originalText, pendingUnsafeFile.analysis, inputEl, pendingUnsafeFile.file, pendingUnsafeFile.fileData);
+      return;
+    } else {
+      pendingUnsafeFile = null;
+    }
   }
 
   if (text && text.length > 0) {
@@ -165,6 +178,19 @@ function handleClick(event) {
         bypassedPrompt = null;
         return;
       }
+      
+      if (pendingUnsafeFile) {
+        if (document.body.textContent.includes(pendingUnsafeFile.file.name)) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          showSecurityPopup(pendingUnsafeFile.originalText, pendingUnsafeFile.analysis, inputEl, pendingUnsafeFile.file, pendingUnsafeFile.fileData);
+          return;
+        } else {
+          pendingUnsafeFile = null;
+        }
+      }
+
       if (text && text.length > 0) {
         event.preventDefault();
         event.stopPropagation();
@@ -487,7 +513,7 @@ function showSecurityPopup(originalText, analysis, inputElement, fileObj = null,
 
   document.getElementById("sp-btn-original").addEventListener("click", () => {
     cleanupPopup();
-    showFinalWarningPopup(originalText, analysis, inputElement, fileObj, fileData);
+    bypassAndSubmitImmediate(originalText, inputElement, fileObj);
   });
 
   document.getElementById("sp-btn-cancel").addEventListener("click", () => {
@@ -682,6 +708,7 @@ function injectTextOnly(text, inputElement) {
 /// Immediately inject and trigger submission
 function bypassAndSubmitImmediate(text, inputElement, fileObj = null) {
   isBypassing = true;
+  pendingUnsafeFile = null;
 
   if (!inputElement && fileObj) {
     // The file was already attached naturally. Just click the send button to bypass.
@@ -988,6 +1015,7 @@ function handleFileAttachment(file, onUnsafe) {
                         reason: "CRITICAL SECURITY RISK: File extraction failed or timed out. File blocked.",
                         entities: [{ item: file.name, type: "BLOCKED_FILE", severity: "High", confidence: 1.0 }]
                     };
+                    pendingUnsafeFile = { originalText: "[Attached File: " + file.name + "]", analysis: errAnalysis, file: file, fileData: fileData };
                     showSecurityPopup("[Attached File: " + file.name + "]", errAnalysis, null, file, fileData);
                     if (onUnsafe) onUnsafe();
                     return;
@@ -997,6 +1025,7 @@ function handleFileAttachment(file, onUnsafe) {
                 updateLiveWidget(analysis.riskScore, analysis.riskLevel);
                 
                 if (analysis.riskScore > 20) {
+                    pendingUnsafeFile = { originalText: "[Attached File: " + file.name + "]", analysis: analysis, file: file, fileData: fileData };
                     showSecurityPopup("[Attached File: " + file.name + "]", analysis, null, file, fileData);
                     if (onUnsafe) onUnsafe();
                 }
