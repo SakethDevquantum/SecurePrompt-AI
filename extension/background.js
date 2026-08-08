@@ -144,4 +144,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true; // Keep channel open
   }
+
+  if (request.action === "classifyIntent") {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+    fetch(`${BACKEND_URL}/classify-intent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: request.prompt }),
+      signal: controller.signal
+    })
+    .then(res => {
+      clearTimeout(timeoutId);
+      if (!res.ok) throw new Error("Backend connection failed");
+      return res.json();
+    })
+    .then(data => {
+      sendResponse({ success: true, classification: data.classification });
+    })
+    .catch(err => {
+      clearTimeout(timeoutId);
+      console.error("Error in classify-intent API:", err);
+      sendResponse({ success: false, error: err.message });
+    });
+    return true; // Keep channel open
+  }
 });

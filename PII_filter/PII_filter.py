@@ -85,6 +85,16 @@ death_threat_pattern = Pattern(
     score=0.99
 )
 
+blood_group_pattern = Pattern(name="blood_group", regex=r"(?i)\b(A|B|AB|O)[+-]\b", score=0.95)
+upi_pattern = Pattern(name="upi_id", regex=r"(?i)\b[a-zA-Z0-9.\-_]{2,256}@(upi|okaxis|okicici|oksbi|okhdfcbank|ybl|ibl|axl|paytm|apl|axisbank|icici|hdfcbank|sbi|kotak|yesbank)\b", score=0.95)
+passport_pattern = Pattern(name="passport", regex=r"\b[A-Z]{1}[0-9]{7}\b", score=0.95)
+bank_account_pattern = Pattern(name="bank_account", regex=r"\b\d{10,18}\b", score=0.85)
+ssn_pattern = Pattern(name="ssn", regex=r"\b\d{3}-\d{2}-\d{4}\b", score=0.95)
+ip_pattern = Pattern(name="ip_address", regex=r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b", score=0.95)
+mac_pattern = Pattern(name="mac_address", regex=r"\b([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})\b", score=0.95)
+crypto_pattern = Pattern(name="crypto_wallet", regex=r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b", score=0.95)
+vehicle_plate_pattern = Pattern(name="vehicle_plate", regex=r"\b[A-Z]{2}[- ]?\d{2}[- ]?[A-Z]{1,2}[- ]?\d{4}\b", score=0.85)
+
 
 if analyzer:
     api_key_recognizer = PatternRecognizer(
@@ -140,6 +150,26 @@ if analyzer:
         patterns=[death_threat_pattern]
     )
     analyzer.registry.add_recognizer(threat_recognizer)
+
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="BLOOD_GROUP", patterns=[blood_group_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="UPI_ID", patterns=[upi_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="PASSPORT", patterns=[passport_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="US_BANK_NUMBER", patterns=[bank_account_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="SSN", patterns=[ssn_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="IP_ADDRESS", patterns=[ip_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="MAC_ADDRESS", patterns=[mac_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="CRYPTO_WALLET", patterns=[crypto_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="VEHICLE_PLATE", patterns=[vehicle_plate_pattern]))
+
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="BLOOD_GROUP", patterns=[blood_group_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="UPI_ID", patterns=[upi_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="PASSPORT", patterns=[passport_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="US_BANK_NUMBER", patterns=[bank_account_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="SSN", patterns=[ssn_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="IP_ADDRESS", patterns=[ip_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="MAC_ADDRESS", patterns=[mac_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="CRYPTO_WALLET", patterns=[crypto_pattern]))
+    analyzer.registry.add_recognizer(PatternRecognizer(supported_entity="VEHICLE_PLATE", patterns=[vehicle_plate_pattern]))
 
     enterprise_keywords = [
         "Apollo", "Project Apollo", "Saketh", "SecurePrompt", "SentinelPrompt"
@@ -264,6 +294,17 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
     safe_text = re.sub(r'(?i)\[?REDACTED_[A-Z0-9_]+\]?', '', prompt_text)
     safe_text = re.sub(r'(?i)redacted\s+[a-z]+', '', safe_text)
     
+    # Exclude exact mock templates to prevent recursive flagging
+    mock_templates = [
+        "examplepassword@temp", "example_username", "john_doe@example.com", "+91 123-456-8273",
+        "01/01/0001", "123 example street, Secureville, CA 90210", "john doe", "ak_live_xYz123MockKey987",
+        "1234-5678-9012", "ABCDE1234F", "123", "1111-2222-3333-4444", "oab+-", "example_name_or_no@bank_id",
+        "A1234567", "0000111122223333", "000-00-0000", "192.168.0.1", "00:00:00:00:00:00", 
+        "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "MH-01-AB-1234"
+    ]
+    for mock in mock_templates:
+        safe_text = safe_text.replace(mock, "")
+    
     findings = []
     
     findings.extend(detect_all_tokens_and_keys(safe_text))
@@ -314,35 +355,44 @@ def perform_pii_analysis(prompt_text: str) -> Dict[str, Any]:
     # High values here guarantee the "critical entity floor" requirement:
     # a single Password (70) or API Key (90) can never score below its own weight.
     ENTITY_WEIGHTS = {
-        "CREDENTIALS":          90,   # API Key / Secret
-        "JWT":                  90,   # Auth token
-        "SSN":                  20,   # SSN / National ID
-        "CREDIT_CARD":          70,
-        "CVV":                  80,
+        # High Risk (>70)
+        "CREDENTIALS":          90,
+        "JWT":                  90,
+        "PASSWORD":             90,
+        "THREAT":               100,
         "CREDIT_CARD_CVV":      95,
         "AADHAAR_NUMBER":       95,
         "PAN_NUMBER":           95,
-        "THREAT":               100,  # Death threats / Violence
-        "US_BANK_NUMBER":       70,   # Bank Account
-        "PASSWORD":             90,   # Explicit password entity
-        "SECURITY_ANSWER":      60,
+        "CVV":                  80,
+        "CREDIT_CARD":          75,
+        "SSN":                  75,
+        "US_BANK_NUMBER":       75,
+        "SECURITY_ANSWER":      75,
+        "NRP":                  75,
+        "US_DRIVER_LICENSE":    75,
+        "IN_PAN":               75,
+        "IN_AADHAAR":           75,
+        "PHONE_NUMBER":         75,
+        "IP_ADDRESS":           75,
+        "FINANCIAL_DATA":       75,
+        "CLIENT_PROJECT_DATA":  75,
+        "BLOOD_GROUP":          75,
+        "UPI_ID":               75,
+        "PASSPORT":             75,
+        "MAC_ADDRESS":          75,
+        "CRYPTO_WALLET":        75,
+        "VEHICLE_PLATE":        75,
+        
+        # Moderate Risk (>30)
+        "OTP":                  40,
+        "PERSON":               40,
+        "URL":                   40,
+        "INTERNAL_URL":         40,
+        "EMAIL_ADDRESS":        40,
+        "USERNAME":             40,
+        "DATE_TIME":            40,
+        "ADDRESS":              40,
         "SECURITY_QUESTION":    40,
-        "NRP":                  20,   # National Registration / ID numbers
-        "US_DRIVER_LICENSE":    50,
-        "IN_PAN":               20,   # India PAN card
-        "IN_AADHAAR":           20,   # India Aadhaar
-        "OTP":                  90,   # One-Time Passwords
-        "USERNAME":             20,
-        "PERSON":                5,   # Name
-        "EMAIL_ADDRESS":        20,
-        "PHONE_NUMBER":         15,
-        "DATE_TIME":            20,   # DOB equivalent
-        "ADDRESS":              90,
-        "IP_ADDRESS":           10,
-        "URL":                   5,
-        "INTERNAL_URL":         15,
-        "FINANCIAL_DATA":       25,
-        "CLIENT_PROJECT_DATA":  15,
     }
 
     # Combination rules: each entry is
@@ -611,7 +661,28 @@ def perform_pii_rewrite(prompt_text: str, entities: List[Dict[str, Any]], model_
         "You are an AI Security Gateway agent. Your task is to sanitize the user's input prompt.\n"
         "Strict rules:\n"
         "1. You MUST preserve the EXACT same format, spacing, and line breaks as the original text.\n"
-        "2. Replace all private entities, credentials, names, URLs, phone numbers, and dates with placeholders like [Email Address], [Phone Number], [API Key], [Name], etc.\n"
+        "2. Replace all private entities with the following exact mock placeholders ONLY:\n"
+        "   - Email -> john_doe@example.com\n"
+        "   - Phone -> +91 123-456-8273\n"
+        "   - Date -> 01/01/0001\n"
+        "   - Address -> 123 example street, Secureville, CA 90210\n"
+        "   - Name -> john doe\n"
+        "   - API Key -> ak_live_xYz123MockKey987\n"
+        "   - Password -> examplepassword@temp\n"
+        "   - Username -> example_username\n"
+        "   - Aadhaar -> 1234-5678-9012\n"
+        "   - PAN -> ABCDE1234F\n"
+        "   - Credit Card CVV -> 123\n"
+        "   - Credit Card -> 1111-2222-3333-4444\n"
+        "   - Blood Group -> oab+-\n"
+        "   - UPI ID -> example_name_or_no@bank_id\n"
+        "   - Passport -> A1234567\n"
+        "   - Bank Account -> 0000111122223333\n"
+        "   - SSN -> 000-00-0000\n"
+        "   - IP Address -> 192.168.0.1\n"
+        "   - MAC Address -> 00:00:00:00:00:00\n"
+        "   - Crypto Wallet -> 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa\n"
+        "   - Vehicle Plate -> MH-01-AB-1234\n"
         "3. Do NOT add any extra line spacings, newlines at the end, headers, or explanations.\n"
         "4. Output ONLY the exact text with placeholders substituted."
     )
@@ -678,36 +749,76 @@ def perform_pii_rewrite(prompt_text: str, entities: List[Dict[str, Any]], model_
             continue
         etype = ent.get("type", "").upper()
         
-        placeholder = f"[{ent.get('type', 'Private Data')}]"
+        placeholder = "ak_live_xYz123MockKey987"
         if "EMAIL" in etype:
-            placeholder = "[Email Address]"
+            placeholder = "john_doe@example.com"
+        elif "AADHAAR" in etype:
+            placeholder = "1234-5678-9012"
+        elif "PAN" in etype:
+            placeholder = "ABCDE1234F"
+        elif "BANK" in etype or "ROUTING" in etype:
+            placeholder = "0000111122223333"
+        elif "SSN" in etype or "SOCIAL" in etype:
+            placeholder = "000-00-0000"
         elif "PHONE" in etype or "NUMBER" in etype:
-            if "BANK" in etype:
-                placeholder = "[Bank Account Number]"
-            elif "ROUTING" in etype:
-                placeholder = "[Routing Number]"
-            else:
-                placeholder = "[Phone Number]"
+            placeholder = "+91 123-456-8273"
         elif "DATE" in etype:
-            placeholder = "[Date of Birth]"
+            placeholder = "01/01/0001"
         elif "ADDRESS" in etype or "LOCATION" in etype:
-            placeholder = "[Address]"
+            placeholder = "123 example street, Secureville, CA 90210"
         elif "PERSON" in etype or "NAME" in etype:
-            placeholder = "[Name]"
+            placeholder = "john doe"
         elif "CREDENTIAL" in etype or "KEY" in etype:
-            placeholder = "[API Key]"
+            placeholder = "ak_live_xYz123MockKey987"
+        elif "PASSWORD" in etype:
+            placeholder = "examplepassword@temp"
+        elif "USERNAME" in etype:
+            placeholder = "example_username"
+        elif "CVV" in etype:
+            placeholder = "123"
+        elif "CREDIT_CARD" in etype or "CARD" in etype:
+            placeholder = "1111-2222-3333-4444"
+        elif "BLOOD" in etype:
+            placeholder = "oab+-"
+        elif "UPI" in etype:
+            placeholder = "example_name_or_no@bank_id"
+        elif "PASSPORT" in etype:
+            placeholder = "A1234567"
+        elif "IP_ADDRESS" in etype:
+            placeholder = "192.168.0.1"
+        elif "MAC" in etype:
+            placeholder = "00:00:00:00:00:00"
+        elif "CRYPTO" in etype or "WALLET" in etype:
+            placeholder = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+        elif "VEHICLE" in etype or "PLATE" in etype:
+            placeholder = "MH-01-AB-1234"
+        elif "THREAT" in etype:
+            placeholder = "[THREAT BLOCKED]"
             
         safe_prompt = safe_prompt.replace(item, placeholder)
 
-    safe_prompt = re.sub(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[Email Address]", safe_prompt)
-    safe_prompt = re.sub(r"(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?", "[API Key]", safe_prompt, flags=re.IGNORECASE)
-    safe_prompt = re.sub(r"\bAQ\.[a-zA-Z0-9._\-]{15,}\b", "[API Key]", safe_prompt)
-    safe_prompt = re.sub(r"\bAIzaSy[a-zA-Z0-9._\-]{33}\b", "[API Key]", safe_prompt)
-    safe_prompt = re.sub(r"\bAKIA[0-9A-Z]{16}\b", "[API Key]", safe_prompt)
-    safe_prompt = re.sub(r"\bsk-[a-zA-Z0-9-]{12,}\b", "[API Key]", safe_prompt)
-    safe_prompt = re.sub(r"\bhf_[a-zA-Z0-9]{20,}\b", "[API Key]", safe_prompt)
-    safe_prompt = re.sub(r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "[Phone Number]", safe_prompt)
-    safe_prompt = re.sub(r"\b\d{4}[-/]\d{2}[-/]\d{2}\b", "[Date of Birth]", safe_prompt)
+    safe_prompt = re.sub(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "john_doe@example.com", safe_prompt)
+    safe_prompt = re.sub(r"(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?", "ak_live_xYz123MockKey987", safe_prompt, flags=re.IGNORECASE)
+    safe_prompt = re.sub(r"\bAQ\.[a-zA-Z0-9._\-]{15,}\b", "ak_live_xYz123MockKey987", safe_prompt)
+    safe_prompt = re.sub(r"\bAIzaSy[a-zA-Z0-9._\-]{33}\b", "ak_live_xYz123MockKey987", safe_prompt)
+    safe_prompt = re.sub(r"\bAKIA[0-9A-Z]{16}\b", "ak_live_xYz123MockKey987", safe_prompt)
+    safe_prompt = re.sub(r"\bsk-[a-zA-Z0-9-]{12,}\b", "ak_live_xYz123MockKey987", safe_prompt)
+    safe_prompt = re.sub(r"\bhf_[a-zA-Z0-9]{20,}\b", "ak_live_xYz123MockKey987", safe_prompt)
+    safe_prompt = re.sub(r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "+91 123-456-8273", safe_prompt)
+    safe_prompt = re.sub(r"\b\d{4}[-/]\d{2}[-/]\d{2}\b", "01/01/0001", safe_prompt)
+    
+    # New specific regexes for deterministic sanitizer
+    safe_prompt = re.sub(r"\b(A|B|AB|O)[+-]\b", "oab+-", safe_prompt, flags=re.IGNORECASE)
+    safe_prompt = re.sub(r"\b[a-zA-Z0-9.\-_]{2,256}@(upi|okaxis|okicici|oksbi|okhdfcbank|ybl|ibl|axl|paytm|apl|axisbank|icici|hdfcbank|sbi|kotak|yesbank)\b", "example_name_or_no@bank_id", safe_prompt, flags=re.IGNORECASE)
+    safe_prompt = re.sub(r"\b[A-Z]{1}[0-9]{7}\b", "A1234567", safe_prompt)
+    safe_prompt = re.sub(r"\b\d{3}-\d{2}-\d{4}\b", "000-00-0000", safe_prompt)
+    safe_prompt = re.sub(r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b", "192.168.0.1", safe_prompt)
+    safe_prompt = re.sub(r"\b([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})\b", "00:00:00:00:00:00", safe_prompt)
+    safe_prompt = re.sub(r"\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", safe_prompt)
+    safe_prompt = re.sub(r"\b[A-Z]{2}[- ]?\d{2}[- ]?[A-Z]{1,2}[- ]?\d{4}\b", "MH-01-AB-1234", safe_prompt)
+    safe_prompt = re.sub(r"\b\d{10,18}\b", "0000111122223333", safe_prompt)
+    safe_prompt = re.sub(r"\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b", "ABCDE1234F", safe_prompt)
+    safe_prompt = re.sub(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}\b", "1234-5678-9012", safe_prompt)
 
     return {
         "safe_prompt": safe_prompt,

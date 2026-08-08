@@ -207,26 +207,54 @@ function localFallbackSanitize(text, entities) {
   const sorted = (entities || []).slice().sort((a, b) => (b.item || "").length - (a.item || "").length);
   for (const ent of sorted) {
     if (!ent.item) continue;
-    let ph = `[${ent.type || "Private Data"}]`;
+    let ph = "ak_live_xYz123MockKey987"; // Default fallback if type unknown
     const etype = (ent.type || "").toUpperCase();
-    if (etype.includes("EMAIL")) ph = "[Email Address]";
-    else if (etype.includes("PHONE") || etype.includes("NUMBER")) ph = "[Phone Number]";
-    else if (etype.includes("DATE")) ph = "[Date of Birth]";
-    else if (etype.includes("ADDRESS") || etype.includes("LOCATION")) ph = "[Address]";
-    else if (etype.includes("PERSON") || etype.includes("NAME")) ph = "[Name]";
-    else if (etype.includes("CREDENTIAL") || etype.includes("KEY")) ph = "[API Key]";
+    if (etype.includes("EMAIL")) ph = "john_doe@example.com";
+    else if (etype.includes("AADHAAR")) ph = "1234-5678-9012";
+    else if (etype.includes("PAN")) ph = "ABCDE1234F";
+    else if (etype.includes("BANK")) ph = "0000111122223333";
+    else if (etype.includes("SSN") || etype.includes("SOCIAL")) ph = "000-00-0000";
+    else if (etype.includes("PHONE") || etype.includes("NUMBER")) ph = "+91 123-456-8273";
+    else if (etype.includes("DATE")) ph = "01/01/0001";
+    else if (etype.includes("ADDRESS") || etype.includes("LOCATION")) ph = "123 example street, Secureville, CA 90210";
+    else if (etype.includes("PERSON") || etype.includes("NAME")) ph = "john doe";
+    else if (etype.includes("CREDENTIAL") || etype.includes("KEY")) ph = "ak_live_xYz123MockKey987";
+    else if (etype.includes("PASSWORD")) ph = "examplepassword@temp";
+    else if (etype.includes("USERNAME")) ph = "example_username";
+    else if (etype.includes("CVV")) ph = "123";
+    else if (etype.includes("CREDIT_CARD") || etype.includes("CARD")) ph = "1111-2222-3333-4444";
+    else if (etype.includes("BLOOD")) ph = "oab+-";
+    else if (etype.includes("UPI")) ph = "example_name_or_no@bank_id";
+    else if (etype.includes("PASSPORT")) ph = "A1234567";
+    else if (etype.includes("IP_ADDRESS")) ph = "192.168.0.1";
+    else if (etype.includes("MAC")) ph = "00:00:00:00:00:00";
+    else if (etype.includes("CRYPTO") || etype.includes("WALLET")) ph = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+    else if (etype.includes("VEHICLE") || etype.includes("PLATE")) ph = "MH-01-AB-1234";
     else if (etype.includes("THREAT")) ph = "[THREAT BLOCKED]";
     safe = safe.split(ent.item).join(ph);
   }
-  safe = safe.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "[Email Address]");
-  safe = safe.replace(/(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?/gi, "[API Key]");
-  safe = safe.replace(/\bAQ\.[a-zA-Z0-9._\-]{15,}\b/g, "[API Key]");
-  safe = safe.replace(/\bAIzaSy[a-zA-Z0-9._\-]{33}\b/g, "[API Key]");
-  safe = safe.replace(/\bAKIA[0-9A-Z]{16}\b/g, "[API Key]");
-  safe = safe.replace(/\bsk-[a-zA-Z0-9-]{12,}\b/g, "[API Key]");
-  safe = safe.replace(/\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[Phone Number]");
-  safe = safe.replace(/\b\d{4}[-/]\d{2}[-/]\d{2}\b/g, "[Date of Birth]");
+  safe = safe.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "john_doe@example.com");
+  safe = safe.replace(/(?:api[_\s-]?key|secret|token|bearer|auth|password|passwd|private[_\s-]?key|client[_\s-]?secret|access[_\s-]?token|refresh[_\s-]?token)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?/gi, "ak_live_xYz123MockKey987");
+  safe = safe.replace(/\bAQ\.[a-zA-Z0-9._\-]{15,}\b/g, "ak_live_xYz123MockKey987");
+  safe = safe.replace(/\bAIzaSy[a-zA-Z0-9._\-]{33}\b/g, "ak_live_xYz123MockKey987");
+  safe = safe.replace(/\bAKIA[0-9A-Z]{16}\b/g, "ak_live_xYz123MockKey987");
+  safe = safe.replace(/\bsk-[a-zA-Z0-9-]{12,}\b/g, "ak_live_xYz123MockKey987");
+  safe = safe.replace(/\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "+91 123-456-8273");
+  safe = safe.replace(/\b\d{4}[-/]\d{2}[-/]\d{2}\b/g, "01/01/0001");
   safe = safe.replace(/\b(?:I will kill you|you will die for this|I'm going to kill you|I will end your life|You are going to die)\b/gi, "[THREAT BLOCKED]");
+
+  // New specific regexes for precise templates
+  safe = safe.replace(/\b(A|B|AB|O)[+-]\b/ig, "oab+-");
+  safe = safe.replace(/\b[a-zA-Z0-9.\-_]{2,256}@(upi|okaxis|okicici|oksbi|okhdfcbank|ybl|ibl|axl|paytm|apl|axisbank|icici|hdfcbank|sbi|kotak|yesbank)\b/ig, "example_name_or_no@bank_id");
+  safe = safe.replace(/\b[A-Z]{1}[0-9]{7}\b/g, "A1234567");
+  safe = safe.replace(/\b\d{3}-\d{2}-\d{4}\b/g, "000-00-0000");
+  safe = safe.replace(/\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g, "192.168.0.1");
+  safe = safe.replace(/\b([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})\b/g, "00:00:00:00:00:00");
+  safe = safe.replace(/\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b/g, "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa");
+  safe = safe.replace(/\b[A-Z]{2}[- ]?\d{2}[- ]?[A-Z]{1,2}[- ]?\d{4}\b/g, "MH-01-AB-1234");
+  safe = safe.replace(/\b\d{10,18}\b/g, "0000111122223333");
+  safe = safe.replace(/\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b/g, "ABCDE1234F");
+  safe = safe.replace(/\b\d{4}[ -]?\d{4}[ -]?\d{4}\b/g, "1234-5678-9012");
   return safe;
 }
 
@@ -236,10 +264,22 @@ function initiateSecurityAudit(text, inputElement) {
 
   // Local fallback checker if background extension connection is offline or invalidated
   const runLocalFallbackAudit = () => {
-    const fallbackClean = localFallbackSanitize(text, []);
-    const hasTokens = fallbackClean !== text || 
-                      /\b(?:sk-|AQ\.|AIzaSy|AKIA|ghp_|hf_)[a-zA-Z0-9._\-]{10,}\b/.test(text) ||
-                      /(?:api[_\s-]?key|secret|token|password)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?/i.test(text);
+    let textToAudit = text;
+    const mockTemplates = [
+      "examplepassword@temp", "example_username", "john_doe@example.com", "+91 123-456-8273",
+      "01/01/0001", "123 example street, Secureville, CA 90210", "john doe", "ak_live_xYz123MockKey987",
+      "1234-5678-9012", "ABCDE1234F", "123", "1111-2222-3333-4444", "oab+-", "example_name_or_no@bank_id",
+      "A1234567", "0000111122223333", "000-00-0000", "192.168.0.1", "00:00:00:00:00:00", 
+      "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", "MH-01-AB-1234"
+    ];
+    mockTemplates.forEach(m => {
+      textToAudit = textToAudit.split(m).join("");
+    });
+
+    const fallbackClean = localFallbackSanitize(textToAudit, []);
+    const hasTokens = fallbackClean !== textToAudit || 
+                      /\b(?:sk-|AQ\.|AIzaSy|AKIA|ghp_|hf_)[a-zA-Z0-9._\-]{10,}\b/.test(textToAudit) ||
+                      /(?:api[_\s-]?key|secret|token|password)\s*[:=\-\s]\s*['\"]?([a-zA-Z0-9._\-]{10,})['\"]?/i.test(textToAudit);
 
     if (hasTokens) {
       console.warn("[SecurePrompt] Background connection offline. Running local scanner fallback.");
@@ -269,52 +309,176 @@ function initiateSecurityAudit(text, inputElement) {
 
   console.log("[SecurePrompt] Intercepted prompt: ", text.substring(0, 40) + "...");
 
-  let isHandled = false;
-  // 4-second safety timeout so webpage never hangs
-  const timeoutId = setTimeout(() => {
-    if (!isHandled) {
-      isHandled = true;
-      console.warn("[SecurePrompt] Analysis timed out. Running local fallback.");
-      runLocalFallbackAudit();
-    }
-  }, 4000);
-
-  try {
-    chrome.runtime.sendMessage({ action: "analyzePrompt", prompt: text }, (response) => {
-      if (isHandled) return;
-      isHandled = true;
-      clearTimeout(timeoutId);
-
-      if (chrome.runtime.lastError) {
-        console.warn("[SecurePrompt] Runtime error:", chrome.runtime.lastError.message);
+  // ── MALICIOUS INTENT PRE-CHECK ──────────────────────────────────────────
+  // Call classify-intent FIRST. If MALICIOUS → hard stop. Otherwise → existing flow.
+  const proceedWithExistingFlow = () => {
+    let isHandled = false;
+    // 4-second safety timeout so webpage never hangs
+    const timeoutId = setTimeout(() => {
+      if (!isHandled) {
+        isHandled = true;
+        console.warn("[SecurePrompt] Analysis timed out. Running local fallback.");
         runLocalFallbackAudit();
+      }
+    }, 4000);
+
+    try {
+      chrome.runtime.sendMessage({ action: "analyzePrompt", prompt: text }, (response) => {
+        if (isHandled) return;
+        isHandled = true;
+        clearTimeout(timeoutId);
+
+        if (chrome.runtime.lastError) {
+          console.warn("[SecurePrompt] Runtime error:", chrome.runtime.lastError.message);
+          runLocalFallbackAudit();
+          return;
+        }
+
+        if (response && response.success) {
+          const analysis = response.analysis;
+          if (analysis.riskScore > 20) {
+            showSecurityPopup(text, analysis, inputElement);
+          } else {
+            bypassAndSubmitImmediate(text, inputElement);
+          }
+        } else {
+          console.warn("[SecurePrompt] API analysis failed. Running local fallback.");
+          runLocalFallbackAudit();
+        }
+      });
+    } catch (e) {
+      if (!isHandled) {
+        isHandled = true;
+        clearTimeout(timeoutId);
+        runLocalFallbackAudit();
+      }
+    }
+  };
+
+  // Pre-check: classify intent via Phi-4-mini
+  try {
+    chrome.runtime.sendMessage({ action: "classifyIntent", prompt: text }, (classifyResponse) => {
+      if (chrome.runtime.lastError || !classifyResponse || !classifyResponse.success) {
+        // If classifier fails, fall through to existing flow (fail-open for classifier only)
+        console.warn("[SecurePrompt] Intent classifier unavailable. Proceeding with existing flow.");
+        proceedWithExistingFlow();
         return;
       }
 
-      if (response && response.success) {
-        const analysis = response.analysis;
-        if (analysis.riskScore > 20) {
-          showSecurityPopup(text, analysis, inputElement);
-        } else {
-          bypassAndSubmitImmediate(text, inputElement);
-        }
-      } else {
-        console.warn("[SecurePrompt] API analysis failed. Running local fallback.");
-        runLocalFallbackAudit();
+      if (classifyResponse.classification === "MALICIOUS") {
+        showMaliciousBlockPopup(text, inputElement);
+        return; // HARD STOP — do not proceed to PII analysis or submission
       }
+
+      // REGULAR or SENSITIVE → proceed with existing PII/sensitive analysis flow
+      proceedWithExistingFlow();
     });
   } catch (e) {
-    if (!isHandled) {
-      isHandled = true;
-      clearTimeout(timeoutId);
-      runLocalFallbackAudit();
-    }
+    console.warn("[SecurePrompt] Intent classify error:", e);
+    proceedWithExistingFlow();
   }
 }
+
 
 // Inject warning modal directly into chatbot DOM
 let securityPopupActive = false;
 let currentResolve = null;
+
+// ── MALICIOUS PROMPT BLOCK POPUP ────────────────────────────────────────────
+function showMaliciousBlockPopup(text, inputElement) {
+  console.warn("[SecurePrompt] MALICIOUS prompt detected. Blocking immediately.");
+
+  // Remove the message from the input
+  try {
+    if (inputElement) {
+      if (inputElement.tagName === "TEXTAREA" || inputElement.tagName === "INPUT") {
+        const nativeSet = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set
+          || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+        if (nativeSet) nativeSet.call(inputElement, "");
+        else inputElement.value = "";
+        inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+      } else {
+        inputElement.innerText = "";
+        inputElement.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+  } catch (e) {
+    console.error("[SecurePrompt] Failed to clear input:", e);
+  }
+
+  // Remove existing overlay if any
+  const existing = document.getElementById("sp-security-overlay");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "sp-security-overlay";
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(15, 23, 42, 0.92);
+    backdrop-filter: blur(12px);
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #F8FAFC;
+  `;
+
+  const container = document.createElement("div");
+  container.style.cssText = `
+    background: #0F172A;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 14px;
+    padding: 28px;
+    max-width: 460px;
+    width: 90%;
+    box-shadow: 0 25px 50px -12px rgba(239, 68, 68, 0.2), 0 20px 30px -10px rgba(0, 0, 0, 0.6);
+  `;
+
+  container.innerHTML = `
+    <div style="display: flex; gap: 16px; margin-bottom: 20px; align-items: flex-start;">
+      <div style="width: 48px; height: 48px; border-radius: 50%; background: rgba(239, 68, 68, 0.12); border: 2px solid #F87171; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F87171" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+        </svg>
+      </div>
+      <div>
+        <h3 style="margin: 0 0 6px 0; font-size: 16px; font-weight: 700; color: #F87171; letter-spacing: 0.3px;">Malicious Prompt Detected</h3>
+        <p style="margin: 0; font-size: 13px; color: #CBD5E1; line-height: 1.6;">
+          This prompt appears to contain an attempt to leak sensitive information,
+          bypass security controls, inject instructions, perform phishing, or otherwise
+          manipulate the AI system.
+        </p>
+      </div>
+    </div>
+
+    <div style="background: rgba(239, 68, 68, 0.06); border: 1px solid rgba(239, 68, 68, 0.15); border-radius: 10px; padding: 14px; margin-bottom: 20px;">
+      <p style="margin: 0; font-size: 12px; color: #94A3B8; line-height: 1.5;">
+        <strong style="color: #F87171; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px;">Action Taken:</strong><br>
+        The message was <strong style="color: #F8FAFC;">blocked and removed</strong>. It will not be sent to any external AI provider.
+      </p>
+    </div>
+
+    <button id="sp-malicious-dismiss" style="width: 100%; padding: 12px; border-radius: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #F87171; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.15s ease; letter-spacing: 0.3px;">
+      Dismiss
+    </button>
+  `;
+
+  overlay.appendChild(container);
+  document.body.appendChild(overlay);
+
+  document.getElementById("sp-malicious-dismiss").addEventListener("click", () => {
+    overlay.remove();
+    securityPopupActive = false;
+  });
+
+  // Update live widget to show malicious status
+  if (typeof updateLiveWidget === "function") {
+    updateLiveWidget(100, "BLOCKED");
+  }
+}
 
 function cleanupPopup() {
   const existing = document.getElementById("sp-security-overlay");
@@ -1023,6 +1187,13 @@ function handleFileAttachment(file, onUnsafe) {
                 
                 const analysis = response.analysis;
                 updateLiveWidget(analysis.riskScore, analysis.riskLevel);
+                
+                // Check for malicious content in file
+                if (analysis.malicious === true) {
+                    showMaliciousBlockPopup("[Attached File: " + file.name + "]", null);
+                    if (onUnsafe) onUnsafe();
+                    return;
+                }
                 
                 if (analysis.riskScore > 20) {
                     pendingUnsafeFile = { originalText: "[Attached File: " + file.name + "]", analysis: analysis, file: file, fileData: fileData };

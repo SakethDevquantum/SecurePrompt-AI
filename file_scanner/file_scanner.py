@@ -397,6 +397,32 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         }
 
 
+def get_mock_placeholder(etype: str) -> str:
+    etype = etype.upper()
+    if "EMAIL" in etype: return "john_doe@example.com"
+    elif "AADHAAR" in etype: return "1234-5678-9012"
+    elif "PAN" in etype: return "ABCDE1234F"
+    elif "BANK" in etype or "ROUTING" in etype: return "0000111122223333"
+    elif "SSN" in etype or "SOCIAL" in etype: return "000-00-0000"
+    elif "PHONE" in etype or "NUMBER" in etype: return "+91 123-456-8273"
+    elif "DATE" in etype: return "01/01/0001"
+    elif "ADDRESS" in etype or "LOCATION" in etype: return "123 example street, Secureville, CA 90210"
+    elif "PERSON" in etype or "NAME" in etype: return "john doe"
+    elif "CREDENTIAL" in etype or "KEY" in etype: return "ak_live_xYz123MockKey987"
+    elif "PASSWORD" in etype: return "examplepassword@temp"
+    elif "USERNAME" in etype: return "example_username"
+    elif "CVV" in etype: return "123"
+    elif "CREDIT_CARD" in etype or "CARD" in etype: return "1111-2222-3333-4444"
+    elif "BLOOD" in etype: return "oab+-"
+    elif "UPI" in etype: return "example_name_or_no@bank_id"
+    elif "PASSPORT" in etype: return "A1234567"
+    elif "IP_ADDRESS" in etype: return "192.168.0.1"
+    elif "MAC" in etype: return "00:00:00:00:00:00"
+    elif "CRYPTO" in etype or "WALLET" in etype: return "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
+    elif "VEHICLE" in etype or "PLATE" in etype: return "MH-01-AB-1234"
+    elif "THREAT" in etype: return "[THREAT BLOCKED]"
+    return "ak_live_xYz123MockKey987"
+
 def redact_file(file_bytes: bytes, filename: str, entities: list) -> dict:
     """
     Redacts sensitive entities from a file.
@@ -417,7 +443,8 @@ def redact_file(file_bytes: bytes, filename: str, entities: list) -> dict:
                 if not item:
                     continue
                 type_ = entity.get("type", "SENSITIVE")
-                text = text.replace(item, f"[REDACTED_{type_}]")
+                ph = get_mock_placeholder(type_)
+                text = text.replace(item, ph)
                 
             encoded = base64.b64encode(text.encode("utf-8")).decode("utf-8")
             return {"success": True, "data": encoded, "mimeType": "text/plain"}
@@ -524,7 +551,8 @@ def redact_file(file_bytes: bytes, filename: str, entities: list) -> dict:
                     if not item: continue
                     type_ = entity.get("type", "SENSITIVE")
                     if item in para.text:
-                        para.text = para.text.replace(item, f"[REDACTED_{type_}]")
+                        ph = get_mock_placeholder(type_)
+                        para.text = para.text.replace(item, ph)
                         
             for table in doc.tables:
                 for row in table.rows:
@@ -535,7 +563,8 @@ def redact_file(file_bytes: bytes, filename: str, entities: list) -> dict:
                                 if not item: continue
                                 type_ = entity.get("type", "SENSITIVE")
                                 if item in para.text:
-                                    para.text = para.text.replace(item, f"[REDACTED_{type_}]")
+                                    ph = get_mock_placeholder(type_)
+                                    para.text = para.text.replace(item, ph)
             out_io = io.BytesIO()
             doc.save(out_io)
             encoded = base64.b64encode(out_io.getvalue()).decode("utf-8")
